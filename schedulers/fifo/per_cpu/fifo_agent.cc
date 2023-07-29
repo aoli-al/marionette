@@ -14,7 +14,6 @@
 #include "lib/enclave.h"
 #include "schedulers/fifo/per_cpu/fifo_scheduler.h"
 
-ABSL_FLAG(std::string, ghost_cpus, "1-5", "cpulist");
 ABSL_FLAG(std::string, enclave, "", "Connect to preexisting enclave directory");
 ABSL_FLAG(std::string, command, "", "Command");
 
@@ -22,7 +21,7 @@ namespace ghost {
 
 static void ParseAgentConfig(AgentConfig* config) {
   CpuList ghost_cpus =
-      MachineTopology()->ParseCpuStr(absl::GetFlag(FLAGS_ghost_cpus));
+      MachineTopology()->ParseCpuStr("0-0");
   CHECK(!ghost_cpus.Empty());
 
   Topology* topology = MachineTopology();

@@ -7,6 +7,7 @@
 #include "schedulers/fifo/per_cpu/fifo_scheduler.h"
 
 #include <memory>
+#include <unistd.h>
 
 namespace ghost {
 
@@ -30,28 +31,12 @@ FifoScheduler::FifoScheduler(Enclave* enclave, CpuList cpulist,
 void FifoScheduler::DumpAllTasks() {
   fprintf(stderr, "task        state   cpu\n");
   allocator()->ForEachTask([](Gtid gtid, const FifoTask* task) {
-    absl::FPrintF(stderr, "%-12s%-8d%-8d%c%c\n", gtid.describe(),
-                  task->run_state, task->cpu, task->preempted ? 'P' : '-',
-                  task->prio_boost ? 'B' : '-');
+    absl::FPrintF(stderr, "%-12s%-8d\n", gtid.describe(), task->cpu);
     return true;
   });
 }
 
 void FifoScheduler::DumpState(const Cpu& cpu, int flags) {
-  if (flags & Scheduler::kDumpAllTasks) {
-    DumpAllTasks();
-  }
-
-  CpuState* cs = cpu_state(cpu);
-  if (!(flags & Scheduler::kDumpStateEmptyRQ) && !cs->current &&
-      cs->run_queue.Empty()) {
-    return;
-  }
-
-  const FifoTask* current = cs->current;
-  const FifoRq* rq = &cs->run_queue;
-  absl::FPrintF(stderr, "SchedState[%d]: %s rq_l=%lu\n", cpu.id(),
-                current ? current->gtid.describe() : "none", rq->Size());
 }
 
 void FifoScheduler::EnclaveReady() {
@@ -81,20 +66,17 @@ Cpu FifoScheduler::AssignCpu(FifoTask* task) {
 }
 
 void FifoScheduler::Migrate(FifoTask* task, Cpu cpu, BarrierToken seqnum) {
-  CHECK_EQ(task->run_state, FifoTaskState::kRunnable);
   CHECK_EQ(task->cpu, -1);
 
   CpuState* cs = cpu_state(cpu);
   const Channel* channel = cs->channel.get();
   CHECK(channel->AssociateTask(task->gtid, seqnum, /*status=*/nullptr));
 
-  GHOST_DPRINT(3, stderr, "Migrating task %s to cpu %d", task->gtid.describe(),
-               cpu.id());
   task->cpu = cpu.id();
 
   // Make task visible in the new runqueue *after* changing the association
   // (otherwise the task can get oncpu while producing into the old queue).
-  cs->run_queue.Enqueue(task);
+  cs->run_queue.Push(task);
 
   // Get the agent's attention so it notices the new task.
   enclave()->GetAgent(cpu)->Ping();
@@ -105,10 +87,9 @@ void FifoScheduler::TaskNew(FifoTask* task, const Message& msg) {
       static_cast<const ghost_msg_payload_task_new*>(msg.payload());
 
   task->seqnum = msg.seqnum();
-  task->run_state = FifoTaskState::kBlocked;
-
+  GHOST_DPRINT(1, stderr, "New task found: %s", task->gtid.describe());
   if (payload->runnable) {
-    task->run_state = FifoTaskState::kRunnable;
+    should_reschedule_ = true;
     Cpu cpu = AssignCpu(task);
     Migrate(task, cpu, msg.seqnum());
   } else {
@@ -118,17 +99,8 @@ void FifoScheduler::TaskNew(FifoTask* task, const Message& msg) {
 }
 
 void FifoScheduler::TaskRunnable(FifoTask* task, const Message& msg) {
-  const ghost_msg_payload_task_wakeup* payload =
-      static_cast<const ghost_msg_payload_task_wakeup*>(msg.payload());
-
-  CHECK(task->blocked());
-  task->run_state = FifoTaskState::kRunnable;
-
-  // A non-deferrable wakeup gets the same preference as a preempted task.
-  // This is because it may be holding locks or resources needed by other
-  // tasks to make progress.
-  task->prio_boost = !payload->deferrable;
-
+  should_reschedule_ = true;
+  GHOST_DPRINT(1, stderr, "Task runnable: %s", task->gtid.describe());
   if (task->cpu < 0) {
     // There cannot be any more messages pending for this task after a
     // MSG_TASK_WAKEUP (until the agent puts it oncpu) so it's safe to
@@ -137,44 +109,38 @@ void FifoScheduler::TaskRunnable(FifoTask* task, const Message& msg) {
     Migrate(task, cpu, msg.seqnum());
   } else {
     CpuState* cs = cpu_state_of(task);
-    cs->run_queue.Enqueue(task);
+    cs->run_queue.Push(task);
   }
 }
 
 void FifoScheduler::TaskDeparted(FifoTask* task, const Message& msg) {
   const ghost_msg_payload_task_departed* payload =
       static_cast<const ghost_msg_payload_task_departed*>(msg.payload());
-
-  if (task->oncpu() || payload->from_switchto) {
-    TaskOffCpu(task, /*blocked=*/false, payload->from_switchto);
-  } else if (task->queued()) {
-    CpuState* cs = cpu_state_of(task);
-    cs->run_queue.Erase(task);
-  } else {
-    CHECK(task->blocked());
-  }
-
+  GHOST_DPRINT(1, stderr, "Task departed: %s", task->gtid.describe());
+  CpuState* cs = cpu_state_of(task);
+  cs->run_queue.Erase(task);
   if (payload->from_switchto) {
     Cpu cpu = topology()->cpu(payload->cpu);
     enclave()->GetAgent(cpu)->Ping();
   }
-
   allocator()->FreeTask(task);
 }
 
 void FifoScheduler::TaskDead(FifoTask* task, const Message& msg) {
-  CHECK(task->blocked());
+  GHOST_DPRINT(1, stderr, "Task dead: %s", task->gtid.describe());
+  CpuState* cs = cpu_state_of(task);
+  cs->run_queue.Erase(task);
   allocator()->FreeTask(task);
 }
 
 void FifoScheduler::TaskYield(FifoTask* task, const Message& msg) {
+  GHOST_DPRINT(1, stderr, "Task yield: %s", task->gtid.describe());
+  should_reschedule_ = true;
   const ghost_msg_payload_task_yield* payload =
       static_cast<const ghost_msg_payload_task_yield*>(msg.payload());
 
-  TaskOffCpu(task, /*blocked=*/false, payload->from_switchto);
-
   CpuState* cs = cpu_state_of(task);
-  cs->run_queue.Enqueue(task);
+  cs->run_queue.Push(task);
 
   if (payload->from_switchto) {
     Cpu cpu = topology()->cpu(payload->cpu);
@@ -183,10 +149,13 @@ void FifoScheduler::TaskYield(FifoTask* task, const Message& msg) {
 }
 
 void FifoScheduler::TaskBlocked(FifoTask* task, const Message& msg) {
+  GHOST_DPRINT(1, stderr, "Task blocked: %s", task->gtid.describe());
+  should_reschedule_ = true;
   const ghost_msg_payload_task_blocked* payload =
       static_cast<const ghost_msg_payload_task_blocked*>(msg.payload());
 
-  TaskOffCpu(task, /*blocked=*/true, payload->from_switchto);
+  CpuState* cs = cpu_state_of(task);
+  cs->run_queue.Push(task, FifoTaskState::kBlocked);
 
   if (payload->from_switchto) {
     Cpu cpu = topology()->cpu(payload->cpu);
@@ -195,16 +164,10 @@ void FifoScheduler::TaskBlocked(FifoTask* task, const Message& msg) {
 }
 
 void FifoScheduler::TaskPreempted(FifoTask* task, const Message& msg) {
+  CpuState* cs = cpu_state_of(task);
+  cs->run_queue.Push(task);
   const ghost_msg_payload_task_preempt* payload =
       static_cast<const ghost_msg_payload_task_preempt*>(msg.payload());
-
-  TaskOffCpu(task, /*blocked=*/false, payload->from_switchto);
-
-  task->preempted = true;
-  task->prio_boost = true;
-  CpuState* cs = cpu_state_of(task);
-  cs->run_queue.Enqueue(task);
-
   if (payload->from_switchto) {
     Cpu cpu = topology()->cpu(payload->cpu);
     enclave()->GetAgent(cpu)->Ping();
@@ -212,70 +175,31 @@ void FifoScheduler::TaskPreempted(FifoTask* task, const Message& msg) {
 }
 
 void FifoScheduler::TaskSwitchto(FifoTask* task, const Message& msg) {
-  TaskOffCpu(task, /*blocked=*/true, /*from_switchto=*/false);
-}
-
-
-void FifoScheduler::TaskOffCpu(FifoTask* task, bool blocked,
-                               bool from_switchto) {
-  GHOST_DPRINT(3, stderr, "Task %s offcpu %d", task->gtid.describe(),
-               task->cpu);
+  GHOST_DPRINT(1, stderr, "Task switchto: %s", task->gtid.describe());
+  should_reschedule_ = true;
   CpuState* cs = cpu_state_of(task);
-
-  if (task->oncpu()) {
-    CHECK_EQ(cs->current, task);
-    cs->current = nullptr;
-  } else {
-    CHECK(from_switchto);
-    CHECK_EQ(task->run_state, FifoTaskState::kBlocked);
-  }
-
-  task->run_state =
-      blocked ? FifoTaskState::kBlocked : FifoTaskState::kRunnable;
+  cs->run_queue.Push(task, FifoTaskState::kBlocked);
 }
 
-void FifoScheduler::TaskOnCpu(FifoTask* task, Cpu cpu) {
-  CpuState* cs = cpu_state(cpu);
-  cs->current = task;
-
-  GHOST_DPRINT(3, stderr, "Task %s oncpu %d", task->gtid.describe(), cpu.id());
-
-  task->run_state = FifoTaskState::kOnCpu;
-  task->cpu = cpu.id();
-  task->preempted = false;
-  task->prio_boost = false;
-}
 
 void FifoScheduler::FifoSchedule(const Cpu& cpu, BarrierToken agent_barrier,
                                  bool prio_boost) {
   CpuState* cs = cpu_state(cpu);
   FifoTask* next = nullptr;
   if (!prio_boost) {
-    next = cs->current;
-    if (!next) next = cs->run_queue.Dequeue();
+    next = cs->run_queue.GetCurrentTask();
+    if (!next || should_reschedule_) {
+      next = cs->run_queue.GetRandom();
+      if (next) {
+        GHOST_DPRINT(1, stderr, "Scheduled thread: %s", next->gtid.describe());
+      }
+      should_reschedule_ = false;
+    }
   }
-
 
   RunRequest* req = enclave()->GetRunRequest(cpu);
   if (next) {
-    GHOST_DPRINT(1, stderr, "FifoSchedule %s on %s cpu %d ",
-                next->gtid.describe(),
-                prio_boost ? "prio-boosted" : "", cpu.id());
-    // Wait for 'next' to get offcpu before switching to it. This might seem
-    // superfluous because we don't migrate tasks past the initial assignment
-    // of the task to a cpu. However a SwitchTo target can migrate and run on
-    // another CPU behind the agent's back. This is usually undetectable from
-    // the agent's pov since the SwitchTo target is blocked and thus !on_rq.
-    //
-    // However if 'next' happens to be the last task in a SwitchTo chain then
-    // it is possible to process TASK_WAKEUP(next) before it has gotten off
-    // the remote cpu. The 'on_cpu()' check below handles this scenario.
-    //
-    // See go/switchto-ghost for more details.
-    while (next->status_word.on_cpu()) {
-      Pause();
-    }
-
+    cs->run_queue.SetCurrentTaskId(next->gtid);
     req->Open({
         .target = next->gtid,
         .target_barrier = next->seqnum,
@@ -285,24 +209,14 @@ void FifoScheduler::FifoSchedule(const Cpu& cpu, BarrierToken agent_barrier,
 
     if (req->Commit()) {
       // Txn commit succeeded and 'next' is oncpu.
-      TaskOnCpu(next, cpu);
     } else {
-      GHOST_DPRINT(3, stderr, "FifoSchedule: commit failed (state=%d)",
+      GHOST_DPRINT(1, stderr, "FifoSchedule: commit failed (state=%d)",
                    req->state());
-
-      if (next == cs->current) {
-        TaskOffCpu(next, /*blocked=*/false, /*from_switchto=*/false);
-      }
-
-      // Txn commit failed so push 'next' to the front of runqueue.
-      next->prio_boost = true;
-      cs->run_queue.Enqueue(next);
+      stale_commit_ = true;
     }
   } else {
-    // If LocalYield is due to 'prio_boost' then instruct the kernel to
-    // return control back to the agent when CPU is idle.
     int flags = 0;
-    if (prio_boost && (cs->current || !cs->run_queue.Empty())) {
+    if (prio_boost) {
       flags = RTLA_ON_IDLE;
     }
     req->LocalYield(agent_barrier, flags);
@@ -325,56 +239,51 @@ void FifoScheduler::Schedule(const Cpu& cpu, const StatusWord& agent_sw) {
   FifoSchedule(cpu, agent_barrier, agent_sw.boosted_priority());
 }
 
-void FifoRq::Enqueue(FifoTask* task) {
+void TaskVector::Push(FifoTask* task, FifoTaskState state) {
   CHECK_GE(task->cpu, 0);
-  CHECK_EQ(task->run_state, FifoTaskState::kRunnable);
-
-  task->run_state = FifoTaskState::kQueued;
-
   absl::MutexLock lock(&mu_);
-  if (task->prio_boost)
-    rq_.push_back(task);
-  else
-    rq_.push_back(task);
+  tasks_.insert(task->gtid.id());
+  task_map_[task->gtid.id()] = task;
+  task_status_[task->gtid.id()] = state;
 }
 
-FifoTask* FifoRq::Dequeue() {
+FifoTask* TaskVector::GetRandom() {
   absl::MutexLock lock(&mu_);
-  if (rq_.empty()) return nullptr;
-  size_t index = std::rand() % rq_.size();
-  FifoTask* task = rq_[index];
-  GHOST_DPRINT(1, stderr, "Num available threads: %d", rq_.size());
-  //   FifoTask* task = rq_.front();
-  CHECK(task->queued());
-  task->run_state = FifoTaskState::kRunnable;
-  rq_.erase(rq_.begin() + index);
+  std::vector<int64_t> runnable;
+  for (auto gtid: tasks_) {
+    if (task_status_[gtid] == FifoTaskState::kRunnable) {
+      runnable.push_back(gtid);
+    }
+  }
+  if (runnable.empty()) {
+    return nullptr;
+  }
+  GHOST_DPRINT(1, stderr, "Num available threads: %d", runnable.size());
+
+  size_t index = std::rand() % runnable.size();
+  FifoTask* task = task_map_[runnable[index]];
   return task;
 }
 
-void FifoRq::Erase(FifoTask* task) {
-  CHECK_EQ(task->run_state, FifoTaskState::kQueued);
+void TaskVector::Erase(FifoTask* task) {
   absl::MutexLock lock(&mu_);
-  size_t size = rq_.size();
-  if (size > 0) {
-    // Check if 'task' is at the back of the runqueue (common case).
-    size_t pos = size - 1;
-    if (rq_[pos] == task) {
-      rq_.erase(rq_.cbegin() + pos);
-      task->run_state = FifoTaskState::kRunnable;
-      return;
-    }
-
-    // Now search for 'task' from the beginning of the runqueue.
-    for (pos = 0; pos < size - 1; pos++) {
-      if (rq_[pos] == task) {
-        rq_.erase(rq_.cbegin() + pos);
-        task->run_state =  FifoTaskState::kRunnable;
-        return;
-      }
-    }
+  task_map_.erase(task->gtid.id());
+  tasks_.erase(task->gtid.id());
+  task_status_.erase(task->gtid.id());
+  if (task->gtid == current_) {
+    current_ = Gtid();
   }
-  CHECK(false);
 }
+
+void TaskVector::SetTaskState(Gtid task_id, FifoTaskState state) {
+  absl::MutexLock lock(&mu_);
+  task_status_[task_id.id()] = state;
+}
+FifoTaskState TaskVector::GetTaskState(Gtid task_id) {
+  absl::MutexLock lock(&mu_);
+  return task_status_[task_id.id()];
+}
+
 
 std::unique_ptr<FifoScheduler> MultiThreadedFifoScheduler(Enclave* enclave,
                                                           CpuList cpulist) {
@@ -415,11 +324,8 @@ std::ostream& operator<<(std::ostream& os, const FifoTaskState& state) {
       return os << "kBlocked";
     case FifoTaskState::kRunnable:
       return os << "kRunnable";
-    case FifoTaskState::kQueued:
-      return os << "kQueued";
-    case FifoTaskState::kOnCpu:
-      return os << "kOnCpu";
   }
+  return os;
 }
 
 }  //  namespace ghost

@@ -1,36 +1,7 @@
 # Note: If you modify this BUILD file, please contact jhumphri@ first to ensure
 # that you are not breaking the Copybara script.
 
-load("@rules_license//rules:license.bzl", "license")
 load("//:bpf/bpf.bzl", "bpf_skeleton")
-
-package(
-    default_applicable_licenses = ["//:license"],
-    default_visibility = ["//:__pkg__"],
-)
-
-license(
-    name = "license",
-    package_name = "ghost",
-)
-
-# Each license covers the code below:
-#
-# BSD 2-clause: Just covers the IOVisor BCC code in third_party/iovisor_bcc/.
-# This code was not written by Google.
-#
-# GPLv2: Just covers the eBPF code in third_party/bpf/. This code was written
-# by Google. We need to license it under GPLv2 though so that the eBPF code
-# can use kernel functionality restricted to code licensed under GPLv2.
-#
-# MIT: Just covers third_party/util/util.h. This code was not written by Google,
-# but was modified by Google.
-#
-# BSD 3-clause: All other code is covered by BSD 3-clause. This includes the
-# library code in lib/, the experiments, all code in bpf/user/, etc.
-licenses(["notice"])
-
-exports_files(["LICENSE"])
 
 compiler_flags = [
     "-Wno-sign-compare",
@@ -177,7 +148,7 @@ cc_binary(
 
 
 cc_binary(
-    name = "fifo_per_cpu_agent",
+    name = "test_scheduler",
     srcs = [
         "schedulers/fifo/per_cpu/fifo_agent.cc",
     ],

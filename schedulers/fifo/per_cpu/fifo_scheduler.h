@@ -18,74 +18,54 @@ namespace ghost {
 enum class FifoTaskState {
   kBlocked,   // not on runqueue.
   kRunnable,  // transitory state:
-              // 1. kBlocked->kRunnable->kQueued
-              // 2. kQueued->kRunnable->kOnCpu
-  kQueued,    // on runqueue.
-  kOnCpu,     // running on cpu.
 };
 
 // For CHECK and friends.
 std::ostream& operator<<(std::ostream& os, const FifoTaskState& state);
 
-static std::atomic<int> total = std::atomic<int>(0);
-
 struct FifoTask : public Task<> {
   explicit FifoTask(Gtid fifo_task_gtid, ghost_sw_info sw_info)
       : Task<>(fifo_task_gtid, sw_info) {}
   ~FifoTask() override {}
-
-  inline bool blocked() const { return run_state == FifoTaskState::kBlocked; }
-  inline bool queued() const { return run_state == FifoTaskState::kQueued; }
-  inline bool oncpu() const { return run_state == FifoTaskState::kOnCpu; }
-
-  // N.B. _runnable() is a transitory state typically used during runqueue
-  // manipulation. It is not expected to be used from task msg callbacks.
-  //
-  // If you are reading this then you probably want to take a closer look
-  // at queued() instead.
-  inline bool _runnable() const {
-    return run_state == FifoTaskState::kRunnable;
-  }
-
-  FifoTaskState run_state = FifoTaskState::kBlocked;
   int cpu = -1;
-
-  int id = total++;
-
-  // Whether the last execution was preempted or not.
-  bool preempted = false;
-
-  // A task's priority is boosted on a kernel preemption or a !deferrable
-  // wakeup - basically when it may be holding locks or other resources
-  // that prevent other tasks from making progress.
-  bool prio_boost = false;
 };
 
-class FifoRq {
+class TaskVector {
  public:
-  FifoRq() = default;
-  FifoRq(const FifoRq&) = delete;
-  FifoRq& operator=(FifoRq&) = delete;
+  TaskVector() = default;
+  TaskVector(const TaskVector&) = delete;
+  TaskVector& operator=(TaskVector&) = delete;
 
-  FifoTask* Dequeue();
-  void Enqueue(FifoTask* task);
-
-  // Erase 'task' from the runqueue.
-  //
-  // Caller must ensure that 'task' is on the runqueue in the first place
-  // (e.g. via task->queued()).
+  FifoTask* GetRandom();
+  void Push(FifoTask* task, FifoTaskState state = FifoTaskState::kRunnable);
   void Erase(FifoTask* task);
+  void SetTaskState(Gtid task_id, FifoTaskState state);
+  FifoTaskState GetTaskState(Gtid task_id);
 
   size_t Size() const {
     absl::MutexLock lock(&mu_);
-    return rq_.size();
+    return tasks_.size();
+  }
+
+  FifoTask * GetCurrentTask() {
+    if (current_.id() == -1) {
+      return nullptr;
+    }
+    return task_map_[current_.id()];
+  }
+
+  void SetCurrentTaskId(Gtid id) {
+    current_ = id;
   }
 
   bool Empty() const { return Size() == 0; }
 
  private:
   mutable absl::Mutex mu_;
-  std::vector<FifoTask*> rq_ ABSL_GUARDED_BY(mu_);
+  Gtid current_;
+  std::unordered_set<int64_t> tasks_ ABSL_GUARDED_BY(mu_);
+  std::unordered_map<int64_t, FifoTask*> task_map_ ABSL_GUARDED_BY(mu_);
+  std::unordered_map<int64_t, FifoTaskState> task_status_ ABSL_GUARDED_BY(mu_);
 };
 
 class FifoScheduler : public BasicDispatchScheduler<FifoTask> {
@@ -139,9 +119,8 @@ class FifoScheduler : public BasicDispatchScheduler<FifoTask> {
   void DumpAllTasks();
 
   struct CpuState {
-    FifoTask* current = nullptr;
     std::unique_ptr<Channel> channel = nullptr;
-    FifoRq run_queue;
+    TaskVector run_queue;
   } ABSL_CACHELINE_ALIGNED;
 
   inline CpuState* cpu_state(const Cpu& cpu) { return &cpu_states_[cpu.id()]; }
@@ -154,6 +133,8 @@ class FifoScheduler : public BasicDispatchScheduler<FifoTask> {
 
   CpuState cpu_states_[MAX_CPUS];
   Channel* default_channel_ = nullptr;
+  bool should_reschedule_ = true;
+  bool stale_commit_ = false;
 };
 
 std::unique_ptr<FifoScheduler> MultiThreadedFifoScheduler(Enclave* enclave,
