@@ -16,7 +16,6 @@ FifoScheduler::FifoScheduler(Enclave* enclave, CpuList cpulist,
     : BasicDispatchScheduler(enclave, std::move(cpulist),
                              std::move(allocator)) {
   for (const Cpu& cpu : cpus()) {
-    // TODO: extend Cpu to get numa node.
     int node = 0;
     CpuState* cs = cpu_state(cpu);
     cs->channel = enclave->MakeChannel(GHOST_MAX_QUEUE_ELEMS, node,
@@ -148,8 +147,12 @@ void FifoScheduler::TaskYield(FifoTask* task, const Message& msg) {
   }
 }
 
+void FifoScheduler::CpuTimerExpired(const Message& msg) {
+  GHOST_DPRINT(1, stderr, "Cpu timer expired: %s", msg.stringify());
+}
+
 void FifoScheduler::TaskBlocked(FifoTask* task, const Message& msg) {
-  GHOST_DPRINT(1, stderr, "Task blocked: %s", task->gtid.describe());
+  GHOST_DPRINT(1, stderr, "Task blocked: %s, %s", task->gtid.describe(), msg.stringify());
   should_reschedule_ = true;
   const ghost_msg_payload_task_blocked* payload =
       static_cast<const ghost_msg_payload_task_blocked*>(msg.payload());

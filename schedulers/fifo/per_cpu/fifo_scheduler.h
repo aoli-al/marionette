@@ -108,6 +108,7 @@ class FifoScheduler : public BasicDispatchScheduler<FifoTask> {
   void TaskBlocked(FifoTask* task, const Message& msg) final;
   void TaskPreempted(FifoTask* task, const Message& msg) final;
   void TaskSwitchto(FifoTask* task, const Message& msg) final;
+  void CpuTimerExpired(const Message& msg) final;
 
  private:
   void FifoSchedule(const Cpu& cpu, BarrierToken agent_barrier,

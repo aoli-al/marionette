@@ -13,7 +13,14 @@ int main() {
     lock = false;
     cout << "Out lock " << a << endl;
   };
+  for (int i = 0; i < 1000; i++) {
+    cout << "Pre loop " << i << endl;
+  }
+
+
   thread t1(f, 1);
+
+
   thread t2(f, 2);
   thread t3(f, 3);
   t1.join();

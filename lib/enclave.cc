@@ -15,7 +15,6 @@
 
 #include "absl/base/attributes.h"
 #include "absl/strings/numbers.h"
-#include "bpf/user/agent.h"
 #include "lib/agent.h"
 #include "lib/scheduler.h"
 
@@ -45,7 +44,6 @@ void Enclave::Ready() {
     CHECK(schedulers_.front()->GetDefaultChannel().SetEnclaveDefault());
   }
 
-  InsertBpfPrograms();
   DisableMyBpfProgLoad();
 
   // On the topic of multithreaded Discovery: the main issue is that global
@@ -473,7 +471,6 @@ LocalEnclave::LocalEnclave(AgentConfig config)
   if (config_.tick_config_ == CpuTickConfig::kAllTicks) {
       SetDeliverTicks(true);
   }
-  CHECK_EQ(agent_bpf_init(), 0);
 }
 
 LocalEnclave::~LocalEnclave() {
@@ -489,14 +486,6 @@ LocalEnclave::~LocalEnclave() {
   GhostHelper()->SetGlobalEnclaveFds(-1, -1);
   delete GhostHelper()->GetGlobalStatusWordTable();
   GhostHelper()->SetGlobalStatusWordTable(nullptr);
-}
-
-void LocalEnclave::InsertBpfPrograms() {
-  int ret;
-  do {
-    ret = agent_bpf_insert_registered(ctl_fd_);
-  } while (ret && errno == EBUSY);
-  CHECK_EQ(ret, 0);
 }
 
 bool LocalEnclave::CommitRunRequests(const CpuList& cpu_list) {
@@ -696,7 +685,6 @@ void LocalEnclave::PrepareToExit() {
   // agent_online), then contact the Agent, which must see IsOnline == false.
   close(agent_online_fd_);
   agent_online_fd_ = -1;
-  agent_bpf_destroy();
 }
 
 void LocalEnclave::WaitForOldAgent() {

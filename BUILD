@@ -1,28 +1,18 @@
 # Note: If you modify this BUILD file, please contact jhumphri@ first to ensure
 # that you are not breaking the Copybara script.
 
-load("//:bpf/bpf.bzl", "bpf_skeleton")
-
 compiler_flags = [
     "-Wno-sign-compare",
-]
-
-bpf_linkopts = [
-    "-lelf",
-    "-lz",
 ]
 
 cc_library(
     name = "agent",
     srcs = [
-        "bpf/user/agent.c",
         "lib/agent.cc",
         "lib/channel.cc",
         "lib/enclave.cc",
     ],
     hdrs = [
-        "bpf/user/agent.h",
-        "bpf/user/schedghostidle_bpf.skel.h",
         "lib/agent.h",
         "lib/channel.h",
         "lib/enclave.h",
@@ -30,7 +20,7 @@ cc_library(
         "//third_party:iovisor_bcc/trace_helpers.h",
     ],
     copts = compiler_flags,
-    linkopts = bpf_linkopts + ["-lnuma"],
+    linkopts = ["-lnuma"],
     deps = [
         ":base",
         ":ghost",
@@ -46,7 +36,6 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
-        "@linux//:libbpf",
     ],
     visibility = ["//visibility:public"],
 
@@ -67,11 +56,7 @@ cc_library(
 
 
 
-exports_files(glob([
-    "kernel/vmlinux_ghost_*.h",
-]) + [
-    "lib/queue.bpf.h",
-])
+exports_files(glob(["kernel/vmlinux_ghost_*.h"]))
 
 cc_library(
     name = "topology",
@@ -122,29 +107,6 @@ cc_library(
     ],
 )
 
-
-
-cc_binary(
-    name = "fdcat",
-    srcs = [
-        "util/fdcat.cc",
-    ],
-    copts = compiler_flags,
-    deps = [
-        ":shared",
-    ],
-)
-
-cc_binary(
-    name = "fdsrv",
-    srcs = [
-        "util/fdsrv.cc",
-    ],
-    copts = compiler_flags,
-    deps = [
-        ":shared",
-    ],
-)
 
 
 cc_binary(
@@ -220,50 +182,5 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
-    ],
-)
-
-cc_binary(
-    name = "enclave_watcher",
-    srcs = [
-        "util/enclave_watcher.cc",
-    ],
-    copts = compiler_flags,
-    deps = [
-        ":agent",
-        ":ghost",
-        "@com_google_absl//absl/flags:parse",
-    ],
-)
-
-cc_binary(
-    name = "pushtosched",
-    srcs = [
-        "util/pushtosched.cc",
-    ],
-    copts = compiler_flags,
-    deps = [
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
-    ],
-)
-
-bpf_skeleton(
-    name = "schedghostidle_bpf_skel",
-    bpf_object = "//third_party/bpf:schedghostidle_bpf",
-    skel_hdr = "bpf/user/schedghostidle_bpf.skel.h",
-)
-
-cc_binary(
-    name = "schedghostidle",
-    srcs = [
-        "bpf/user/schedghostidle.c",
-        "bpf/user/schedghostidle_bpf.skel.h",
-        "//third_party:iovisor_bcc/trace_helpers.h",
-    ],
-    copts = compiler_flags,
-    linkopts = bpf_linkopts,
-    deps = [
-        "@linux//:libbpf",
     ],
 )
