@@ -1,0 +1,21 @@
+[package]
+name = "marionette"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+syscalls = { version = "0.6", default-features = false }
+libc = "0.2"
+atoi = "2.0.0"
+regex = "1.9.3"
+nix = { version = "0.26.2", features = ["sched", "process", "event"] }
+signal-hook = "0.3.17"
+
+[toolchain]
+channel = "nightly"
+
+[build-dependencies]
+bindgen = "0.66.1"
+cc = "1.0"
