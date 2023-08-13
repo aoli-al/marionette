@@ -65,7 +65,7 @@ impl Channel {
     }
 
     pub fn associate_task(&self, id: gtid::Gtid, barrier: u32, ctr_fd: i32) -> i32 {
-        let mut msg_src = ghost_msg_src {
+        let msg_src = ghost_msg_src {
             type_: ghost_type_GHOST_TASK,
             arg: id.gtid_raw as u64
         };
@@ -76,7 +76,7 @@ impl Channel {
             flags: 0
         };
         unsafe {
-            libc::ioctl(ctr_fd, GHOST_IOC_CREATE_QUEUE_C, &mut data as *mut _)
+            libc::ioctl(ctr_fd, GHOST_IOC_ASSOC_QUEUE_C, &mut data as *mut _)
         }
     }
 }

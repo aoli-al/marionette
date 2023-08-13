@@ -17,7 +17,7 @@ use super::*;
 use crate::{
     channel::Channel,
     enclave::{Enclave, SafeEnclave},
-    external::safe_ghost_status_word,
+    external::{safe_ghost_status_word, safe_ghost_ring},
     ghost::StatusWordTable,
     gtid::{self, Gtid},
     message::{payload, payload_task_new_msg, Message},
@@ -109,7 +109,6 @@ impl<'a> Agent<'a> {
         while !self.finished.has_been_notified() || !self.tasks.is_empty() {
             let agent_barrier = unsafe { (*self.status_word.sw).barrier.load(Ordering::SeqCst) };
 
-            println!("Schedule: agent_barrier[{}] = {}", self.cpu, agent_barrier);
             while let Some(m) = self.peek() {
                 println!("Message found!");
                 self.dispatch(m);
@@ -186,15 +185,16 @@ impl<'a> Agent<'a> {
     fn peek(&self) -> Option<Message> {
         let header = self.channel.header;
         unsafe {
-            let r = (header as *mut char).add((*header).start as usize) as *mut ghost_ring;
+            let r = (header as *mut u8).add((*header).start as usize) as *mut safe_ghost_ring;
             let nelems = (*header).nelems;
-            let head = (*r).head;
-            let tail = (*r).tail;
+            let head = (*r).head.load(Ordering::Acquire);
+            let tail = (*r).tail.load(Ordering::Acquire);
+            let overflow = (*r).overflow.load(Ordering::SeqCst);
+            println!("{}, {}", head, tail);
 
             if tail == head {
                 return None;
             }
-            let overflow = (*r).overflow;
             assert_eq!(overflow, 0);
             let tidx = tail & (nelems - 1);
             let msg = ((*r).msgs).as_mut_ptr().add(tidx as usize);
