@@ -8,7 +8,7 @@ use crate::enclave::{Enclave, SafeEnclave};
 pub struct Channel {
     map_size: usize,
     pub fd: i32,
-    header: *mut ghost_queue_header,
+    pub header: *mut ghost_queue_header,
     elems: u32,
 }
 
@@ -23,6 +23,7 @@ impl Channel {
             };
             let ctl_fd = enclave.ctl_file.lock().unwrap().as_raw_fd();
             let fd = libc::ioctl(ctl_fd, GHOST_IOC_CREATE_QUEUE_C, &mut data as *mut _);
+            println!("channel fd: {}", fd);
             assert!(fd > 0);
             let map_size = data.mapsize as usize;
             let header = libc::mmap(
@@ -60,6 +61,22 @@ impl Channel {
         unsafe {
             let res = libc::ioctl(ctl_fd, GHOST_IOC_SET_DEFAULT_QUEUE_C, &mut data as *mut _);
             assert_eq!(res, 0);
+        }
+    }
+
+    pub fn associate_task(&self, id: gtid::Gtid, barrier: u32, ctr_fd: i32) -> i32 {
+        let mut msg_src = ghost_msg_src {
+            type_: ghost_type_GHOST_TASK,
+            arg: id.gtid_raw as u64
+        };
+        let mut data = ghost_ioc_assoc_queue {
+            fd: self.fd,
+            src: msg_src,
+            barrier,
+            flags: 0
+        };
+        unsafe {
+            libc::ioctl(ctr_fd, GHOST_IOC_CREATE_QUEUE_C, &mut data as *mut _)
         }
     }
 }

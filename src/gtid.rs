@@ -1,8 +1,46 @@
-use std::{fs::OpenOptions, path::PathBuf, thread, io::{BufReader, BufRead, Read, self}};
+use std::{fs::OpenOptions, path::PathBuf, thread, io::{BufReader, BufRead, Read, self}, hash::Hasher, hash::Hash, fmt};
 
+
+#[derive(Clone, Copy)]
 pub struct Gtid {
     pub gtid_raw: i64,
 }
+
+pub static NULL_GTID: Gtid = Gtid::new(0);
+pub static AGENT_GTID: Gtid = Gtid::new(-1);
+pub static IDLE_GTID: Gtid = Gtid::new(-2);
+
+impl fmt::Display for Gtid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.gtid_raw)
+    }
+}
+
+impl Eq for Gtid {
+
+}
+
+impl PartialEq for Gtid {
+    fn eq(&self, other: &Self) -> bool {
+        self.gtid_raw == other.gtid_raw
+    }
+}
+
+impl Hash for Gtid {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.gtid_raw.hash(state);
+    }
+}
+
+impl Gtid {
+    pub const fn new(gtid_raw: i64) -> Self {
+        Self {
+            gtid_raw
+        }
+    }
+}
+
+
 
 pub struct GtidStore {
 }

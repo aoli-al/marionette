@@ -2,28 +2,37 @@ use super::*;
 use std::{
     collections::HashMap,
     os::fd::AsRawFd,
-    sync::{Arc, Mutex}, thread,
+    sync::{
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        Arc, Barrier, Mutex,
+    },
+    thread,
 };
 
 use crate::{
     agent::{Agent, Notification, NotificationTrait},
     channel::{self, Channel},
     enclave::{Enclave, SafeEnclave},
+    external::safe_ghost_status_word,
     ghost::StatusWordTable,
     ghost_ioc_sw_get_info, ghost_msg_src, ghost_type_GHOST_AGENT,
     gtid::Gtid,
-    GHOST_MAX_QUEUE_ELEMS,
+    GHOST_MAX_QUEUE_ELEMS, requester::RunRequest,
 };
 
 pub struct StatusWord {
     sw_info: ghost_sw_info,
-    sw: *mut ghost_status_word,
-    owner: Gtid,
+    pub sw: *mut safe_ghost_status_word,
 }
 
 impl StatusWord {
-    pub fn new(enclave: &SafeEnclave, word_table: &StatusWordTable) -> Self {
-        let ctl_fd = enclave.ctl_file.lock().unwrap().as_raw_fd();
+    pub fn new(owner: Gtid, word_table: &StatusWordTable, sw_info: ghost_sw_info) -> Self {
+        unsafe {
+            let sw = word_table.table.add(sw_info.index as usize);
+            Self { sw_info, sw }
+        }
+    }
+    pub fn from_world_table(ctl_fd: i32, word_table: &StatusWordTable) -> Self {
         unsafe {
             let mut req = ghost_ioc_sw_get_info {
                 request: ghost_msg_src {
@@ -36,17 +45,22 @@ impl StatusWord {
             assert_eq!(res, 0);
             let sw_info = req.response;
             assert_eq!((*word_table.header).id, sw_info.id);
-            let sw = word_table.table.add(sw_info.index as usize);
             let owner = gtid::current();
-            Self { sw_info, sw, owner }
+            StatusWord::new(owner, word_table, sw_info)
         }
     }
+
+    pub fn boosted_priority(&self) -> bool {
+        let res = unsafe {(*self.sw).flags.load(Ordering::SeqCst) };
+        res & GHOST_SW_BOOST_PRIO != 0
+    }
+
 }
 
 pub struct Task {
-    gtid: Gtid,
-    status_word: StatusWord,
-    seqnum: u64,
+    pub gtid: Gtid,
+    pub status_word: StatusWord,
+    pub seqnum: AtomicU32,
 }
 
 struct TaskAllocator {
@@ -59,15 +73,17 @@ impl TaskAllocator {
     }
 }
 
-pub struct Scheduler<'a> {
+pub struct AgentManager<'a> {
     pub tasks: HashMap<usize, Vec<Task>>,
     pub enclave: &'a Enclave,
 }
 
 unsafe impl Send for StatusWordTable {}
 unsafe impl Sync for StatusWordTable {}
+unsafe impl Send for RunRequest {}
+unsafe impl Sync for RunRequest {}
 
-impl<'a> Scheduler<'a> {
+impl<'a> AgentManager<'a> {
     pub fn new(enclave: &'a mut Enclave) -> Self {
         let mut channels = HashMap::<usize, Channel>::new();
         let mut tasks = HashMap::<usize, Vec<Task>>::new();
@@ -80,38 +96,66 @@ impl<'a> Scheduler<'a> {
 
     pub fn start(&self) {
         let safe_e = &self.enclave.safe_e;
+        let unsafe_e = &self.enclave.unsafe_e;
         let word_table = &self.enclave.unsafe_e.word_table;
+        let ctl_fd = self.enclave.safe_e.ctl_file.lock().unwrap().as_raw_fd();
         thread::scope(|s| {
-            let agent_notifications: Vec<Notification> =
-                vec![Default::default(); self.enclave.safe_e.cpus.len()];
+            let cpus = &self.enclave.safe_e.cpus;
             let init_flag = Arc::new(Mutex::new(false));
+            let init_barrier = Arc::new(Barrier::new(cpus.len()));
+            let discovery_flag = Arc::new(Mutex::new(0));
+
             for i in 0..self.enclave.safe_e.cpus.len() {
                 let cpu = self.enclave.safe_e.cpus[i];
-                let mut notification = agent_notifications[i].clone();
+                let request = unsafe_e.build_cpu_reps(cpu);
                 let flag_clone = Arc::clone(&init_flag);
+                let init_clone = init_barrier.clone();
+                let discovery_clone = discovery_flag.clone();
                 s.spawn(move || {
-                    let mut agent = Agent::new(cpu, safe_e, word_table);
-                    notification.notify();
+                    let mut agent = Agent::new(cpu, safe_e, word_table, ctl_fd, request);
+
+                    init_clone.wait();
 
                     let mut has_inited = flag_clone.lock().unwrap();
                     if !*has_inited {
-
-
-
+                        agent.channel.set_default_queue(ctl_fd);
                         *has_inited = true;
                     }
 
-                    agent.run();
-                });
-            }
+                    {
+                        let mut res = discovery_clone.lock().unwrap();
+                        agent.discover_tasks();
+                        *res += 1;
+                    }
 
-            for notification in agent_notifications {
-                notification.wait();
+                    init_clone.wait();
+
+                    println!("Init done");
+                    unsafe {
+                        agent.run();
+                    }
+                });
             }
         });
     }
 
     pub fn tasks_of(&self, cpu: usize) -> &Vec<Task> {
         self.tasks.get(&cpu).unwrap()
+    }
+}
+
+
+pub struct Scheduler {
+    run_queue: Vec<Gtid>
+}
+
+impl Scheduler {
+    pub fn new() -> Self {
+        Self {
+            run_queue: Vec::new()
+        }
+    }
+    pub fn task_new(&mut self, task: &Task) {
+        self.run_queue.push(task.gtid);
     }
 }

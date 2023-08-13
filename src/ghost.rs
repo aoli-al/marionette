@@ -1,9 +1,12 @@
 use libc::SIGINT;
 use signal_hook::iterator::Signals;
 
+use crate::external::safe_ghost_status_word;
+
 use super::*;
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::atomic::Ordering;
 use std::{
     fs::{File, OpenOptions},
     os::fd::{AsFd, AsRawFd},
@@ -18,7 +21,7 @@ pub struct StatusWordTable {
     pub f: File,
     pub map_size: usize,
     pub header: *mut ghost_sw_region_header,
-    pub table: *mut ghost_status_word,
+    pub table: *mut safe_ghost_status_word,
 }
 
 impl StatusWordTable {
@@ -50,11 +53,27 @@ impl StatusWordTable {
             assert!((*header).id == id as u32);
             assert!((*header).numa_node == numa_node as u32);
             let table =
-                (header as *const u8).offset((*header).start as isize) as *mut ghost_status_word;
+                (header as *const u8).offset((*header).start as isize) as *mut safe_ghost_status_word;
 
             Self {
                 f, map_size, header, table
             }
+        }
+    }
+
+    pub unsafe fn for_each_task_status_word<F>(&self, mut f: F)
+    where
+        F: FnMut(*mut safe_ghost_status_word, u32, u32),
+    {
+        for i in 0..(*self.header).capacity {
+            let sw = self.table.add(i as usize);
+            if (*sw).flags.load(Ordering::SeqCst) & GHOST_SW_F_INUSE == 0 {
+                continue;
+            }
+            if (*sw).flags.load(Ordering::SeqCst) & GHOST_SW_TASK_IS_AGENT != 0 {
+                continue;
+            }
+            f(sw, (*self.header).id, i);
         }
     }
 }

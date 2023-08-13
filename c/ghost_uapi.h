@@ -155,9 +155,11 @@ const unsigned long int GHOST_IOC_NULL_C = GHOST_IOC_NULL;
 #define GHOST_IOC_SW_GET_INFO		_IOWR('g', 1, struct ghost_ioc_sw_get_info)
 const unsigned long int GHOST_IOC_SW_GET_INFO_C = GHOST_IOC_SW_GET_INFO;
 #define GHOST_IOC_SW_FREE		_IOW('g', 2, struct ghost_sw_info)
+const unsigned long int GHOST_IOC_SW_FREE_C = GHOST_IOC_SW_FREE;
 #define GHOST_IOC_CREATE_QUEUE		_IOWR('g', 3, struct ghost_ioc_create_queue)
 const unsigned long int GHOST_IOC_CREATE_QUEUE_C = GHOST_IOC_CREATE_QUEUE;
 #define GHOST_IOC_ASSOC_QUEUE		_IOW('g', 4, struct ghost_ioc_assoc_queue)
+const unsigned long int GHOST_IOC_ASSOC_QUEUE_C = GHOST_IOC_ASSOC_QUEUE;
 #define GHOST_IOC_SET_DEFAULT_QUEUE	_IOW('g', 5, struct ghost_ioc_set_default_queue)
 const unsigned long int GHOST_IOC_SET_DEFAULT_QUEUE_C = GHOST_IOC_SET_DEFAULT_QUEUE;
 #define GHOST_IOC_CONFIG_QUEUE_WAKEUP	_IOW('g', 6, struct ghost_ioc_config_queue_wakeup)
@@ -167,6 +169,7 @@ const unsigned long int GHOST_IOC_CONFIG_QUEUE_WAKEUP_C = GHOST_IOC_CONFIG_QUEUE
 #define GHOST_IOC_SYNC_GROUP_TXN	_IOW('g', 9, struct ghost_ioc_commit_txn)
 #define GHOST_IOC_TIMERFD_SETTIME	_IOWR('g', 10, struct ghost_ioc_timerfd_settime)
 #define GHOST_IOC_RUN			_IOW('g', 11, struct ghost_ioc_run)
+const unsigned long int GHOST_IOC_RUN_C = GHOST_IOC_RUN;
 
 /*
  * Status word region APIs.

@@ -1,5 +1,5 @@
 use crate::ghost::StatusWordTable;
-use crate::requester::Requester;
+use crate::requester::RunRequest;
 use crate::topology::CpuList;
 use crate::topology::Topology;
 
@@ -27,7 +27,7 @@ static GOAST_FS_MOUNT: &str = "/sys/fs/ghost";
 pub static GHOST_VERSION: i32 = 83;
 
 pub struct CpuDel {
-    requester: Requester,
+    requester: RunRequest,
 }
 
 pub struct Enclave {
@@ -130,10 +130,12 @@ pub fn set_cpu_mask(dir_path: &PathBuf, enclave_cpus: &CpuList) {
         .open(dir_path.join("cpumask"))
         .expect("Failed to open CPU mask");
     let cpu_mask = enclave_cpus.cpu_mask_string();
+    println!("cpumask: {}", cpu_mask);
     for _ in 0..10 {
         match cpu_mask_file.write(cpu_mask.as_bytes()) {
             Ok(len) if len == cpu_mask.len() => break,
             _ => {
+                println!("write cpu mask failed");
                 thread::sleep(Duration::from_millis(50));
             }
         }
@@ -155,7 +157,7 @@ pub fn build_cpu_reps(
             cpus.insert(
                 i,
                 CpuDel {
-                    requester: Requester {
+                    requester: RunRequest {
                         txn: &((*data_region.add(i)).txn) as *const _,
                     },
                 },
@@ -172,6 +174,7 @@ impl Enclave {
         let data_region = enclave::get_cpu_data_region(&dir_path);
         let word_table = ghost::StatusWordTable::new(&dir_path, 0, 0);
         let enclave_cpus = CpuList::from_vec(topology.num_cpus, &vec![0usize]);
+        set_cpu_mask(&dir_path, &enclave_cpus);
         let cpu_reps = build_cpu_reps(&enclave_cpus, &topology, data_region);
 
         Self {
@@ -180,10 +183,19 @@ impl Enclave {
         }
     }
 }
+
+impl UnsafeEnclave {
+    pub fn build_cpu_reps(&self, cpu: usize) -> RunRequest {
+        unsafe {
+            RunRequest {
+                txn: &((*self.data_region.add(cpu)).txn) as *const _,
+            }
+        }
+    }
+}
 impl SafeEnclave {
     pub fn sched_agent_enter_ghost(&self, cpu: usize, queue_fd: i32) {
         let cmd = format!("become agent {} {}", cpu, queue_fd);
-        println!("{}", cmd);
         loop {
             match self.ctl_file.lock().unwrap().write(cmd.as_bytes()) {
                 Ok(len) if len == cmd.len() => {
@@ -191,7 +203,7 @@ impl SafeEnclave {
                 }
                 Err(e) => {
                     println!("{}", e);
-                    // assert_eq!(e.raw_os_error().unwrap(), libc::EBUSY);
+                    assert_eq!(Error::last_os_error().raw_os_error().unwrap(), libc::EBUSY);
                 }
                 _ => {}
             }
