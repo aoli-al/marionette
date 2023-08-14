@@ -110,7 +110,7 @@ impl<'a> Agent<'a> {
             let agent_barrier = unsafe { (*self.status_word.sw).barrier.load(Ordering::SeqCst) };
 
             while let Some(m) = self.peek() {
-                println!("Message found!");
+                println!("start dispatch");
                 self.dispatch(&m);
                 self.consume(m);
             }
@@ -126,6 +126,7 @@ impl<'a> Agent<'a> {
             None
         };
         if let Some(gtid) = next {
+            println!("Scheduled! {}", gtid);
             self.run_request.open(RunRequestOption {
                 target: gtid,
                 target_barrier: self.tasks[&gtid].seqnum.load(Ordering::SeqCst),
@@ -134,7 +135,9 @@ impl<'a> Agent<'a> {
                 ..Default::default()
             });
 
-            self.run_request.commit(self.ctl_fd);
+            if !self.run_request.commit(self.ctl_fd) {
+                self.scheduler.add_task(&gtid);
+            }
 
         } else {
             let mut flags = 0;
@@ -174,16 +177,17 @@ impl<'a> Agent<'a> {
         }
     }
 
-    fn dispatch(&mut self, m: &Message) {
-        if m.get_type() == MSG_NOP {
+    fn dispatch(&mut self, msg: &Message) {
+        println!("new message: {}", msg.get_type());
+        if msg.get_type() == MSG_NOP {
             return;
         }
-        if m.is_cpu_msg() {
+        if msg.is_cpu_msg() {
             return;
         }
-        let gtid = m.get_gtid();
-        if m.get_type() == MSG_TASK_NEW {
-            let payload = m.get_payload_as::<ghost_msg_payload_task_new>();
+        let gtid = msg.get_gtid();
+        if msg.get_type() == MSG_TASK_NEW {
+            let payload = msg.get_payload_as::<ghost_msg_payload_task_new>();
             if !self.create_task(gtid, unsafe { payload.read_unaligned().sw_info }) {
                 println!("Error: task exists: {}", gtid);
                 return;
@@ -192,14 +196,42 @@ impl<'a> Agent<'a> {
 
 
         let mut update_seqnum = true;
-        match m.get_type() {
+        match msg.get_type() {
             MSG_TASK_NEW => {
-                self.task_new(gtid, m);
+                self.task_new(gtid, msg);
                 update_seqnum = false;
             }
 
             MSG_TASK_PREEMPT => {
-
+                self.task_preempted(gtid, msg);
+            }
+            MSG_TASK_DEAD => {
+                self.task_dead(gtid, msg);
+                update_seqnum = false;
+            }
+            MSG_TASK_WAKEUP => {
+                self.task_runnable(gtid, msg);
+            }
+            MSG_TASK_BLOCKED => {
+                self.task_blocked(gtid, msg);
+            }
+            MSG_TASK_YIELD => {
+                self.task_yield(gtid, msg);
+            }
+            MSG_TASK_DEPARTED => {
+                self.task_departed(gtid, msg);
+                update_seqnum = false;
+            }
+            MSG_TASK_SWITCHTO => {
+                self.task_switchto(gtid, msg);
+            }
+            MSG_TASK_AFFINITY_CHANGED => {
+                // todo!("impl this");
+            }
+            MSG_TASK_PRIORITY_CHANGED => {
+                // todo!("impl this");
+            }
+            MSG_TASK_ON_CPU => {
             }
             _ => {}
         }
@@ -217,8 +249,6 @@ impl<'a> Agent<'a> {
             let head = (*r).head.load(Ordering::Acquire);
             let tail = (*r).tail.load(Ordering::Acquire);
             let overflow = (*r).overflow.load(Ordering::SeqCst);
-            println!("{}, {}", head, tail);
-
             if tail == head {
                 return None;
             }
@@ -232,8 +262,8 @@ impl<'a> Agent<'a> {
     pub fn task_preempted(&mut self, gtid: Gtid, msg: &Message) {
         self.scheduler.add_task(&gtid);
         let payload = msg.get_payload_as::<ghost_msg_payload_task_preempt>();
-        if unsafe { (*payload).from_switchto } != 0 {
-            let cpu = unsafe { (*payload).cpu };
+        if unsafe { payload.read_unaligned().from_switchto } != 0 {
+            let cpu = unsafe { payload.read_unaligned().cpu };
             self.ping(cpu);
         }
     }
@@ -245,8 +275,8 @@ impl<'a> Agent<'a> {
     pub fn task_blocked(&mut self, gtid: Gtid, msg: &Message) {
         self.scheduler.remove_task(&gtid);
         let payload = msg.get_payload_as::<ghost_msg_payload_task_blocked>();
-        if unsafe { (*payload).from_switchto } != 0 {
-            let cpu = unsafe { (*payload).cpu };
+        if unsafe { payload.read_unaligned().from_switchto } != 0 {
+            let cpu = unsafe { payload.read_unaligned().cpu };
             self.ping(cpu);
         }
     }
@@ -254,8 +284,8 @@ impl<'a> Agent<'a> {
     pub fn task_yield(&mut self, gtid: Gtid, msg: &Message) {
         self.scheduler.add_task(&gtid);
         let payload = msg.get_payload_as::<ghost_msg_payload_task_yield>();
-        if unsafe { (*payload).from_switchto } != 0 {
-            let cpu = unsafe { (*payload).cpu };
+        if unsafe { payload.read_unaligned().from_switchto } != 0 {
+            let cpu = unsafe { payload.read_unaligned().cpu };
             self.ping(cpu);
         }
     }
@@ -263,8 +293,8 @@ impl<'a> Agent<'a> {
     pub fn task_departed(&mut self, gtid: Gtid, msg: &Message) {
         self.scheduler.remove_task(&gtid);
         let payload = msg.get_payload_as::<ghost_msg_payload_task_departed>();
-        if unsafe { (*payload).from_switchto } != 0 {
-            let cpu = unsafe { (*payload).cpu };
+        if unsafe { payload.read_unaligned().from_switchto } != 0 {
+            let cpu = unsafe { payload.read_unaligned().cpu };
             self.ping(cpu);
         }
         self.tasks.remove(&gtid);
@@ -380,7 +410,6 @@ impl<'a> Agent<'a> {
     }
 
     fn create_task(&mut self, id: Gtid, swi: ghost_sw_info) -> bool {
-        println!("New task created! {}, {}, {}", id, swi.id, swi.index);
         if self.tasks.contains_key(&id) {
             return false;
         }
@@ -397,34 +426,10 @@ impl<'a> Agent<'a> {
     }
 
     pub fn task_new(&mut self, gtid: Gtid, msg: &Message) {
-        println!("New task found: {}", gtid);
         let task = self.tasks.get_mut(&gtid).unwrap();
         let synth = msg.get_payload_as::<ghost_msg_payload_task_new>();
-        let should_ping = {
-            task.seqnum.store(msg.get_seqnum(), Ordering::SeqCst);
-            if unsafe { synth.read_unaligned().runnable } != 0 {
-                let res = self.channel.associate_task(
-                    task.gtid,
-                    task.seqnum.load(Ordering::SeqCst),
-                    self.ctl_fd,
-                );
-                assert!(res >= 0);
-                task.cpu = self.cpu;
-                self.scheduler.add_task(&task.gtid);
-                true
-            } else {
-                false
-            }
-        };
-        if should_ping {
-            self.ping(self.cpu as i32);
-        }
-    }
-
-    pub fn task_runnable(&mut self, gtid: Gtid, msg: &Message) {
-        let task = self.tasks.get_mut(&gtid).unwrap();
-
-        if task.cpu < 0 {
+        task.seqnum.store(msg.get_seqnum(), Ordering::SeqCst);
+        if unsafe { synth.read_unaligned().runnable } != 0 {
             let res = self.channel.associate_task(
                 task.gtid,
                 task.seqnum.load(Ordering::SeqCst),
@@ -432,8 +437,26 @@ impl<'a> Agent<'a> {
             );
             assert!(res >= 0);
             task.cpu = self.cpu;
+            self.scheduler.add_task(&task.gtid);
+            self.ping(self.cpu as i32);
         }
+    }
+
+    pub fn task_runnable(&mut self, gtid: Gtid, msg: &Message) {
+        let task = self.tasks.get_mut(&gtid).unwrap();
         self.scheduler.add_task(&gtid);
+        println!("msg: {}, task: {}", msg.get_seqnum(), task.seqnum.load(Ordering::SeqCst));
+        if task.cpu < 0 {
+            let res = self.channel.associate_task(
+                task.gtid,
+                msg.get_seqnum(),
+                self.ctl_fd,
+            );
+            println!("error: {}, {}", res, Error::last_os_error());
+            assert!(res >= 0);
+            task.cpu = self.cpu;
+            self.ping(self.cpu as i32);
+        }
     }
 
 

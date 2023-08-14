@@ -102,12 +102,15 @@ impl RunRequest {
                 libc::ioctl(ctl_fd, GHOST_IOC_COMMIT_TXN_C, &mut data as *mut _)
             };
             assert_eq!(res, 0);
+        } else {
+            println!("request is not open?");
         }
 
         while !self.is_committed() {
             hint::spin_loop();
         }
         let state = self.state();
+        println!("State: {}", state);
         state == ghost_txn_state_GHOST_TXN_COMPLETE
     }
 }
