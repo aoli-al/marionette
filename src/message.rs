@@ -24,6 +24,10 @@ impl Message {
         unsafe { (*self.msg).type_ as u32 }
     }
 
+    pub fn length(&self) -> usize {
+        unsafe { (*self.msg).length as usize }
+    }
+
 
     pub fn is_cpu_msg(&self) -> bool {
         self.get_type() >= _MSG_CPU_FIRST && self.get_type() <= _MSG_CPU_LAST
@@ -34,7 +38,7 @@ impl Message {
     }
 
     pub fn get_gtid(&self) -> Gtid {
-        let gtid = unsafe { *((*self.msg).payload.as_ptr() as *const i64) };
+        let gtid = unsafe { ((*self.msg).payload.as_ptr() as *const i64).read_unaligned() };
         Gtid::new(gtid)
     }
 

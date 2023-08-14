@@ -166,6 +166,7 @@ const unsigned long int GHOST_IOC_SET_DEFAULT_QUEUE_C = GHOST_IOC_SET_DEFAULT_QU
 const unsigned long int GHOST_IOC_CONFIG_QUEUE_WAKEUP_C = GHOST_IOC_CONFIG_QUEUE_WAKEUP;
 #define GHOST_IOC_GET_CPU_TIME		_IOWR('g', 7, struct ghost_ioc_get_cpu_time)
 #define GHOST_IOC_COMMIT_TXN		_IOW('g', 8, struct ghost_ioc_commit_txn)
+const unsigned long int GHOST_IOC_COMMIT_TXN_C = GHOST_IOC_COMMIT_TXN;
 #define GHOST_IOC_SYNC_GROUP_TXN	_IOW('g', 9, struct ghost_ioc_commit_txn)
 #define GHOST_IOC_TIMERFD_SETTIME	_IOWR('g', 10, struct ghost_ioc_timerfd_settime)
 #define GHOST_IOC_RUN			_IOW('g', 11, struct ghost_ioc_run)

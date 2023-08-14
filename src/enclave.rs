@@ -27,7 +27,7 @@ static GOAST_FS_MOUNT: &str = "/sys/fs/ghost";
 pub static GHOST_VERSION: i32 = 83;
 
 pub struct CpuDel {
-    requester: RunRequest,
+    pub requester: RunRequest,
 }
 
 pub struct Enclave {
@@ -39,12 +39,11 @@ pub struct SafeEnclave {
     pub dir_path: PathBuf,
     pub ctl_file: Mutex<File>,
     pub topology: Topology,
-    pub cpus: Vec<usize>,
+    pub cpus: Vec<i32>,
 }
 
 pub struct UnsafeEnclave {
     pub data_region: *mut ghost_cpu_data,
-    pub cpu_reps: HashMap<usize, CpuDel>,
     pub word_table: StatusWordTable,
 }
 
@@ -142,59 +141,36 @@ pub fn set_cpu_mask(dir_path: &PathBuf, enclave_cpus: &CpuList) {
     }
 }
 
-pub fn build_cpu_reps(
-    enclave_cpus: &CpuList,
-    topology: &Topology,
-    data_region: *mut ghost_cpu_data,
-) -> HashMap<usize, CpuDel> {
-    let cpu_set = enclave_cpus.to_cpu_set();
-    let mut cpus = HashMap::<usize, CpuDel>::new();
-    for i in 0..topology.num_cpus {
-        if !cpu_set.is_set(i).expect("failed to check cpu set") {
-            continue;
-        }
-        unsafe {
-            cpus.insert(
-                i,
-                CpuDel {
-                    requester: RunRequest {
-                        txn: &((*data_region.add(i)).txn) as *const _,
-                    },
-                },
-            );
-        }
-    }
-    cpus
-}
-
 impl Enclave {
     pub fn new(topology: Topology) -> Self {
         let (dir_path, ctl_file) = enclave::create_and_attach_to_enclave().expect("msg");
         // let abi_version = enclave::get_abi_version(&dir_path);
         let data_region = enclave::get_cpu_data_region(&dir_path);
         let word_table = ghost::StatusWordTable::new(&dir_path, 0, 0);
-        let enclave_cpus = CpuList::from_vec(topology.num_cpus, &vec![0usize]);
+        let cpus = vec![0i32];
+        let enclave_cpus = CpuList::from_vec(topology.num_cpus as i32, &cpus);
         set_cpu_mask(&dir_path, &enclave_cpus);
-        let cpu_reps = build_cpu_reps(&enclave_cpus, &topology, data_region);
 
         Self {
-            safe_e: SafeEnclave { dir_path, ctl_file: Mutex::new(ctl_file), topology, cpus: cpu_reps.keys().map(|it| *it).collect() },
-            unsafe_e: UnsafeEnclave { data_region, cpu_reps, word_table }
+            safe_e: SafeEnclave { dir_path, ctl_file: Mutex::new(ctl_file), topology, cpus },
+            unsafe_e: UnsafeEnclave { data_region, word_table }
         }
     }
 }
 
 impl UnsafeEnclave {
-    pub fn build_cpu_reps(&self, cpu: usize) -> RunRequest {
+    pub fn build_cpu_reps(&self, cpu: i32) -> RunRequest {
         unsafe {
             RunRequest {
-                txn: &((*self.data_region.add(cpu)).txn) as *const _,
+                txn: &mut ((*self.data_region.add(cpu as usize)).txn) as *mut _,
+                allow_txn_target_on_cpu: false,
+                cpu
             }
         }
     }
 }
 impl SafeEnclave {
-    pub fn sched_agent_enter_ghost(&self, cpu: usize, queue_fd: i32) {
+    pub fn sched_agent_enter_ghost(&self, cpu: i32, queue_fd: i32) {
         let cmd = format!("become agent {} {}", cpu, queue_fd);
         loop {
             match self.ctl_file.lock().unwrap().write(cmd.as_bytes()) {
@@ -231,7 +207,7 @@ impl SafeEnclave {
             allowed_cpus
         };
 
-        let agent_affinity = CpuList::from_cpuset(self.topology.num_cpus, &allowed_cpus);
+        let agent_affinity = CpuList::from_cpuset(self.topology.num_cpus as i32, &allowed_cpus);
 
         assert_eq!(agent_affinity.size(), 1);
         assert!(agent_affinity.is_set(cpu));

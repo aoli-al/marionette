@@ -1,6 +1,6 @@
 use super::*;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     os::fd::AsRawFd,
     sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
@@ -61,6 +61,7 @@ pub struct Task {
     pub gtid: Gtid,
     pub status_word: StatusWord,
     pub seqnum: AtomicU32,
+    pub cpu: i32,
 }
 
 struct TaskAllocator {
@@ -146,16 +147,26 @@ impl<'a> AgentManager<'a> {
 
 
 pub struct Scheduler {
-    run_queue: Vec<Gtid>
+    run_queue: HashSet<Gtid>
 }
 
 impl Scheduler {
     pub fn new() -> Self {
         Self {
-            run_queue: Vec::new()
+            run_queue: HashSet::new()
         }
     }
-    pub fn task_new(&mut self, task: &Task) {
-        self.run_queue.push(task.gtid);
+    pub fn add_task(&mut self, id: &Gtid) {
+        self.run_queue.insert(*id);
+    }
+
+    pub fn get_next(&mut self) -> Option<Gtid> {
+        let elem = self.run_queue.iter().next()?.clone();
+        self.run_queue.remove(&elem);
+        Some(elem)
+    }
+
+    pub fn remove_task(&mut self, id: &Gtid) {
+        self.run_queue.retain(|&x| x != *id);
     }
 }

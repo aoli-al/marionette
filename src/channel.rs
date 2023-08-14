@@ -13,7 +13,7 @@ pub struct Channel {
 }
 
 impl Channel {
-    pub fn new(elems: usize, node: usize, cpu: usize, enclave: &SafeEnclave) -> Self {
+    pub fn new(elems: usize, node: usize, cpu: i32, enclave: &SafeEnclave) -> Self {
         unsafe {
             let mut data = ghost_ioc_create_queue {
                 elems: elems as i32,
@@ -38,7 +38,7 @@ impl Channel {
             let elems = (*header).nelems;
 
             let mut wakeup = ghost_agent_wakeup {
-                cpu: cpu as i32,
+                cpu,
                 prio: 0
             };
             let mut data = ghost_ioc_config_queue_wakeup {

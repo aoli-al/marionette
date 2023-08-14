@@ -12,23 +12,23 @@ use std::{fmt::format, fs::OpenOptions, path::PathBuf};
 const TOPOLOGY_TEST_SUBPATH: &str = "topology_test";
 const TOPOLOGY_TEST_SYS_SUBPATH: &str = "sys/devices/system";
 const MAX_CPUS: usize = 512;
-const INTS_BITS: usize = 8 * std::mem::size_of::<u64>();
-const MAP_CAPACITY: usize = MAX_CPUS / INTS_BITS;
+const INTS_BITS: i32 = (8 * std::mem::size_of::<u64>()) as i32;
+const MAP_CAPACITY: usize = MAX_CPUS / INTS_BITS as usize;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct CpuList {
-    num_cpus: usize,
-    map_size: usize,
+    num_cpus: i32,
+    map_size: i32,
     bitmap: [u64; MAP_CAPACITY],
 }
 
 pub struct CpuListIter<'a> {
     map: &'a CpuList,
-    id: usize,
+    id: i32,
 }
 
 impl<'a> CpuListIter<'a> {
-    pub fn new(map: &'a CpuList, id: usize) -> Self {
+    pub fn new(map: &'a CpuList, id: i32) -> Self {
         let mut iter = Self { map, id };
         iter.find_next_set_bit();
         iter
@@ -43,17 +43,17 @@ impl<'a> CpuListIter<'a> {
             self.id = self.map.num_cpus;
             return;
         }
-        word = self.map.bitmap[map_idx];
+        word = self.map.bitmap[map_idx as usize];
         word &= !0u64 << bit_offset;
 
         while map_idx < self.map.map_size {
             if word != 0 {
-                self.id = map_idx * INTS_BITS + word.trailing_zeros() as usize;
+                self.id = map_idx * INTS_BITS + word.trailing_zeros() as i32;
                 return;
             }
             map_idx += 1;
             if (map_idx < self.map.map_size) {
-                word = self.map.bitmap[map_idx];
+                word = self.map.bitmap[map_idx as usize];
             }
         }
         self.id = self.map.num_cpus;
@@ -61,7 +61,7 @@ impl<'a> CpuListIter<'a> {
 }
 
 impl<'a> Iterator for CpuListIter<'a> {
-    type Item = usize;
+    type Item = i32;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.id == self.map.num_cpus {
@@ -75,7 +75,7 @@ impl<'a> Iterator for CpuListIter<'a> {
 }
 
 impl CpuList {
-    pub fn new(num_cpus: usize) -> Self {
+    pub fn new(num_cpus: i32) -> Self {
         let map_size = (num_cpus + INTS_BITS - 1) / INTS_BITS;
         Self {
             num_cpus,
@@ -84,7 +84,7 @@ impl CpuList {
         }
     }
 
-    pub fn from_vec(num_cpus: usize, cpus: &Vec<usize>) -> Self {
+    pub fn from_vec(num_cpus: i32, cpus: &Vec<i32>) -> Self {
         let mut cpu_list = CpuList::new(num_cpus);
         for cpu in cpus {
             cpu_list.set(*cpu);
@@ -92,11 +92,11 @@ impl CpuList {
         cpu_list
     }
 
-    pub fn from_cpuset(num_cpus: usize, cpus: &libc::cpu_set_t) -> Self {
+    pub fn from_cpuset(num_cpus: i32, cpus: &libc::cpu_set_t) -> Self {
         let mut cpu_list = CpuList::new(num_cpus);
         for cpu in 0..libc::CPU_SETSIZE {
             if unsafe {libc::CPU_ISSET(cpu as usize, cpus)} {
-                cpu_list.set(cpu as usize);
+                cpu_list.set(cpu);
             }
         }
         cpu_list
@@ -110,11 +110,11 @@ impl CpuList {
         size
     }
 
-    pub fn set(&mut self, id: usize) {
-        self.bitmap[id / INTS_BITS] |= (1u64 << (id % INTS_BITS));
+    pub fn set(&mut self, id: i32) {
+        self.bitmap[(id / INTS_BITS) as usize] |= (1u64 << (id % INTS_BITS));
     }
-    pub fn is_set(&self, id: usize) -> bool {
-        (self.bitmap[id / INTS_BITS] & (1u64 << (id % INTS_BITS))) != 0
+    pub fn is_set(&self, id: i32) -> bool {
+        (self.bitmap[(id / INTS_BITS) as usize] & (1u64 << (id % INTS_BITS))) != 0
     }
 
     pub fn begin(&self) -> CpuListIter {
@@ -128,7 +128,7 @@ impl CpuList {
     pub fn to_cpu_set(&self) -> CpuSet {
         let mut set = CpuSet::new();
         for cpu in self {
-            set.set(cpu).expect("Failed to create CPU set");
+            set.set(cpu as usize).expect("Failed to create CPU set");
         }
         set
     }
@@ -136,11 +136,11 @@ impl CpuList {
     pub fn cpu_mask_string(&self) -> String {
         let mut s = String::new();
         let mut emitted_nibble = false;
-        let u64_size = std::mem::size_of::<u64>();
+        let u64_size = std::mem::size_of::<u64>() as i32;
         let byte_size = 8;
         for i in 0..self.map_size * u64_size {
             let idx = i / u64_size;
-            let value = self.bitmap[idx];
+            let value = self.bitmap[idx as usize];
             let offset = byte_size - (i % u64_size) - 1;
             let byte = ((value >> (byte_size * offset)) & 0xff) as u8;
             let hi = byte >> 4;
@@ -179,7 +179,7 @@ impl CpuList {
 }
 
 impl<'a> IntoIterator for &'a CpuList {
-    type Item = usize;
+    type Item = i32;
 
     type IntoIter = CpuListIter<'a>;
 
@@ -191,8 +191,8 @@ impl<'a> IntoIterator for &'a CpuList {
 pub struct Cpu {}
 
 pub struct CpuRep {
-    cpu: usize,
-    core: usize,
+    cpu: i32,
+    core: i32,
     smt_idx: usize,
     siblings: CpuList,
     l3_siblings: CpuList,
@@ -207,8 +207,8 @@ pub struct Topology {
     pub cpus_on_node: Vec<CpuList>,
 }
 
-fn get_all_siblings(prefix: &str, suffix: &str, num_cpus: usize) -> HashMap<usize, CpuList> {
-    let mut sibling_map: HashMap<String, Vec<usize>> = HashMap::new();
+fn get_all_siblings(prefix: &str, suffix: &str, num_cpus: i32) -> HashMap<i32, CpuList> {
+    let mut sibling_map: HashMap<String, Vec<i32>> = HashMap::new();
     for i in 0..num_cpus {
         let path = PathBuf::from(prefix).join(format!("cpu{}", i)).join(suffix);
         let f = OpenOptions::new()
@@ -230,7 +230,7 @@ fn get_all_siblings(prefix: &str, suffix: &str, num_cpus: usize) -> HashMap<usiz
             .push(i);
     }
 
-    let mut siblings = HashMap::<usize, CpuList>::new();
+    let mut siblings = HashMap::<i32, CpuList>::new();
     for (_, cpus) in sibling_map {
         for cpu in &cpus {
             let cpu_list = CpuList::from_vec(num_cpus, &cpus);
@@ -263,7 +263,7 @@ fn get_highest_node_idx(path: PathBuf) -> usize {
 
 impl Topology {
     pub fn new() -> Self {
-        let num_cpus = std::thread::available_parallelism().unwrap().get();
+        let num_cpus = std::thread::available_parallelism().unwrap().get() as i32;
         let siblings = get_all_siblings(
             "/sys/devices/system/cpu",
             "topology/thread_siblings",
@@ -298,23 +298,24 @@ impl Topology {
             get_highest_node_idx(PathBuf::from("/sys/devices/system/node/possible"));
 
         // Assertions
-        for cpu in all_cpus.begin() {
-            assert!(cpus[cpu].siblings.is_set(cpu));
+        for c in all_cpus.begin() {
+            let cpu = c as usize;
+            assert!(cpus[cpu].siblings.is_set(c));
             for sibling in &cpus[cpu].siblings {
-                assert_eq!(&cpus[sibling].siblings, &cpus[cpu].siblings);
+                assert_eq!(&cpus[sibling as usize].siblings, &cpus[cpu].siblings);
             }
             for l3_sibling in &cpus[cpu].l3_siblings {
-                assert_eq!(&cpus[l3_sibling].l3_siblings, &cpus[cpu].l3_siblings);
+                assert_eq!(&cpus[l3_sibling as usize].l3_siblings, &cpus[cpu].l3_siblings);
             }
         }
 
         let mut cpus_on_node = vec![CpuList::new(num_cpus); highest_node_idx + 1];
         for cpu in &all_cpus {
-            let node = cpus[cpu].numa_node;
+            let node = cpus[cpu as usize].numa_node;
             cpus_on_node[node].set(cpu);
         }
         Self {
-            num_cpus,
+            num_cpus: num_cpus as usize,
             all_cpus,
             cpus,
             highest_node_idx,

@@ -1,1 +1,8 @@
-use std::sync::atomic::{AtomicUsize, Ordering, AtomicPtr};
+use std::{sync::atomic::{AtomicUsize, Ordering, AtomicPtr}, arch::asm};
+
+#[macro_export]
+macro_rules! roundup2 {
+    ($x:expr, $y:expr) => {
+        (($x) + ($y - 1)) & (!(($y) - 1))
+    };
+}
