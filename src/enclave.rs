@@ -5,10 +5,10 @@ use crate::topology::Topology;
 
 use super::*;
 use atoi::atoi;
-use libc::MAP_FAILED;
 use libc::epoll_ctl;
 use libc::epoll_event;
 use libc::sched_getaffinity;
+use libc::MAP_FAILED;
 use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -32,7 +32,7 @@ pub struct CpuDel {
 
 pub struct Enclave {
     pub safe_e: SafeEnclave,
-    pub unsafe_e: UnsafeEnclave
+    pub unsafe_e: UnsafeEnclave,
 }
 
 pub struct SafeEnclave {
@@ -46,7 +46,6 @@ pub struct UnsafeEnclave {
     pub data_region: *mut ghost_cpu_data,
     pub word_table: StatusWordTable,
 }
-
 
 pub fn create_and_attach_to_enclave() -> Result<(PathBuf, File), ()> {
     let ctl_path = PathBuf::from(&GOAST_FS_MOUNT).join("ctl");
@@ -152,8 +151,16 @@ impl Enclave {
         set_cpu_mask(&dir_path, &enclave_cpus);
 
         Self {
-            safe_e: SafeEnclave { dir_path, ctl_file: Mutex::new(ctl_file), topology, cpus },
-            unsafe_e: UnsafeEnclave { data_region, word_table }
+            safe_e: SafeEnclave {
+                dir_path,
+                ctl_file: Mutex::new(ctl_file),
+                topology,
+                cpus,
+            },
+            unsafe_e: UnsafeEnclave {
+                data_region,
+                word_table,
+            },
         }
     }
 }
@@ -164,7 +171,7 @@ impl UnsafeEnclave {
             RunRequest {
                 txn: &mut ((*self.data_region.add(cpu as usize)).txn) as *mut _,
                 allow_txn_target_on_cpu: false,
-                cpu
+                cpu,
             }
         }
     }

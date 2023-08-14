@@ -1,5 +1,12 @@
-use std::{fs::OpenOptions, path::PathBuf, thread, io::{BufReader, BufRead, Read, self}, hash::Hasher, hash::Hash, fmt};
-
+use std::{
+    fmt,
+    fs::OpenOptions,
+    hash::Hash,
+    hash::Hasher,
+    io::{self, BufRead, BufReader, Read},
+    path::PathBuf,
+    thread,
+};
 
 #[derive(Clone, Copy)]
 pub struct Gtid {
@@ -16,9 +23,7 @@ impl fmt::Display for Gtid {
     }
 }
 
-impl Eq for Gtid {
-
-}
+impl Eq for Gtid {}
 
 impl PartialEq for Gtid {
     fn eq(&self, other: &Self) -> bool {
@@ -34,32 +39,22 @@ impl Hash for Gtid {
 
 impl Gtid {
     pub const fn new(gtid_raw: i64) -> Self {
-        Self {
-            gtid_raw
-        }
+        Self { gtid_raw }
     }
 }
 
-
-
-pub struct GtidStore {
-}
-
+pub struct GtidStore {}
 
 pub fn current() -> Gtid {
-    let gtid_raw= nix::unistd::gettid().as_raw() as i64;
-    Gtid {
-        gtid_raw
-    }
+    let gtid_raw = nix::unistd::gettid().as_raw() as i64;
+    Gtid { gtid_raw }
 }
 
 pub fn gtid(pid: i64) -> io::Result<i64> {
     let proc = PathBuf::from("/proc")
         .join(pid.to_string())
         .join("ghost/gtid");
-    let mut stream = OpenOptions::new()
-        .read(true)
-        .open(proc)?;
+    let mut stream = OpenOptions::new().read(true).open(proc)?;
     let mut content = String::new();
     stream.read_to_string(&mut content)?;
     Ok(content.trim().parse().expect("Failed to parse"))

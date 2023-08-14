@@ -14,7 +14,7 @@ use std::{
 };
 
 pub struct Ghost {
-    word_stable: StatusWordTable
+    word_stable: StatusWordTable,
 }
 
 pub struct StatusWordTable {
@@ -52,11 +52,14 @@ impl StatusWordTable {
             assert!((*header).capacity > 0);
             assert!((*header).id == id as u32);
             assert!((*header).numa_node == numa_node as u32);
-            let table =
-                (header as *const u8).offset((*header).start as isize) as *mut safe_ghost_status_word;
+            let table = (header as *const u8).offset((*header).start as isize)
+                as *mut safe_ghost_status_word;
 
             Self {
-                f, map_size, header, table
+                f,
+                map_size,
+                header,
+                table,
             }
         }
     }
@@ -78,15 +81,14 @@ impl StatusWordTable {
     }
 }
 
-
 pub struct GhostSignals<'a> {
-    handlers: HashMap<i32, &'a fn(i32) -> bool>
+    handlers: HashMap<i32, &'a fn(i32) -> bool>,
 }
 
-impl <'a> GhostSignals<'a> {
+impl<'a> GhostSignals<'a> {
     pub fn new() -> Self {
         let signal = Self {
-            handlers: HashMap::new()
+            handlers: HashMap::new(),
         };
 
         let mut signals = Signals::new(&[SIGINT]).expect("Can not register signals");

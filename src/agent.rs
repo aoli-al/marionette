@@ -10,18 +10,19 @@ use std::{
     },
 };
 
-use libc::{ENOENT, ESTALE, ENODEV};
+use libc::{ENODEV, ENOENT, ESTALE};
 use nix::sys::ptrace::Request;
 
 use super::*;
 use crate::{
     channel::Channel,
     enclave::{Enclave, SafeEnclave},
-    external::{safe_ghost_status_word, safe_ghost_ring},
+    external::{safe_ghost_ring, safe_ghost_status_word},
     ghost::StatusWordTable,
     gtid::{self, Gtid},
     message::{payload, payload_task_new_msg, Message},
-    scheduler::{AgentManager, Scheduler, StatusWord, Task}, requester::{RunRequest, RunRequestOption},
+    requester::{RunRequest, RunRequestOption},
+    scheduler::{AgentManager, Scheduler, StatusWord, Task},
 };
 
 pub type Notification = Arc<(Mutex<bool>, Condvar)>;
@@ -74,7 +75,7 @@ impl<'a> Agent<'a> {
         safe_e: &'a SafeEnclave,
         word_table: &'a StatusWordTable,
         ctl_fd: i32,
-        run_request: RunRequest
+        run_request: RunRequest,
     ) -> Self {
         let channel = Channel::new(GHOST_MAX_QUEUE_ELEMS as usize, 0, cpu, safe_e);
         unsafe {
@@ -100,7 +101,7 @@ impl<'a> Agent<'a> {
             ctl_fd,
             tasks: HashMap::new(),
             scheduler: Scheduler::new(),
-            run_request
+            run_request,
         };
         agent
     }
@@ -119,8 +120,8 @@ impl<'a> Agent<'a> {
     }
 
     fn schedule(&mut self, agent_barrier: u32) {
-        let boosted_priority =self.status_word.boosted_priority();
-        let next = if  !boosted_priority {
+        let boosted_priority = self.status_word.boosted_priority();
+        let next = if !boosted_priority {
             self.scheduler.get_next()
         } else {
             None
@@ -138,7 +139,6 @@ impl<'a> Agent<'a> {
             if !self.run_request.commit(self.ctl_fd) {
                 self.scheduler.add_task(&gtid);
             }
-
         } else {
             let mut flags = 0;
             if boosted_priority {
@@ -148,22 +148,19 @@ impl<'a> Agent<'a> {
         }
     }
 
-    fn local_yield(&self, agent_barrier: u32,  run_flags: i32) {
+    fn local_yield(&self, agent_barrier: u32, run_flags: i32) {
         let mut data = ghost_ioc_run {
             gtid: 0,
             agent_barrier: agent_barrier,
             task_barrier: 0,
             run_cpu: self.cpu as i32,
-            run_flags
+            run_flags,
         };
-        let res = unsafe {
-            libc::ioctl(self.ctl_fd, GHOST_IOC_RUN_C, &mut data as *mut _)
-        };
+        let res = unsafe { libc::ioctl(self.ctl_fd, GHOST_IOC_RUN_C, &mut data as *mut _) };
         if res != 0 {
             let errno = Error::last_os_error().raw_os_error().unwrap();
             assert!(errno == ESTALE || errno == ENODEV);
         }
-
     }
 
     fn consume(&self, m: Message) {
@@ -193,7 +190,6 @@ impl<'a> Agent<'a> {
                 return;
             }
         }
-
 
         let mut update_seqnum = true;
         match msg.get_type() {
@@ -231,8 +227,7 @@ impl<'a> Agent<'a> {
             MSG_TASK_PRIORITY_CHANGED => {
                 // todo!("impl this");
             }
-            MSG_TASK_ON_CPU => {
-            }
+            MSG_TASK_ON_CPU => {}
             _ => {}
         }
 
@@ -419,7 +414,7 @@ impl<'a> Agent<'a> {
                 gtid: id,
                 status_word: StatusWord::new(id, self.word_table, swi),
                 seqnum: AtomicU32::new(0),
-                cpu: -1
+                cpu: -1,
             },
         );
         true
@@ -445,20 +440,21 @@ impl<'a> Agent<'a> {
     pub fn task_runnable(&mut self, gtid: Gtid, msg: &Message) {
         let task = self.tasks.get_mut(&gtid).unwrap();
         self.scheduler.add_task(&gtid);
-        println!("msg: {}, task: {}", msg.get_seqnum(), task.seqnum.load(Ordering::SeqCst));
+        println!(
+            "msg: {}, task: {}",
+            msg.get_seqnum(),
+            task.seqnum.load(Ordering::SeqCst)
+        );
         if task.cpu < 0 {
-            let res = self.channel.associate_task(
-                task.gtid,
-                msg.get_seqnum(),
-                self.ctl_fd,
-            );
+            let res = self
+                .channel
+                .associate_task(task.gtid, msg.get_seqnum(), self.ctl_fd);
             println!("error: {}, {}", res, Error::last_os_error());
             assert!(res >= 0);
             task.cpu = self.cpu;
             self.ping(self.cpu as i32);
         }
     }
-
 
     pub fn ping(&self, cpu: i32) -> i32 {
         let mut data = ghost_ioc_run {
@@ -468,8 +464,6 @@ impl<'a> Agent<'a> {
             run_cpu: cpu,
             run_flags: 0,
         };
-        unsafe {
-            libc::ioctl(self.ctl_fd, GHOST_IOC_RUN_C, &mut data as *mut _)
-        }
+        unsafe { libc::ioctl(self.ctl_fd, GHOST_IOC_RUN_C, &mut data as *mut _) }
     }
 }

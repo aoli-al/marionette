@@ -1,8 +1,13 @@
 use std::hint;
 
-use libc::{system, CPU_ZERO, CPU_SET};
+use libc::{system, CPU_SET, CPU_ZERO};
 
-use crate::{ghost_txn, gtid::Gtid, ghost_txn_state, ghost_txn_state_GHOST_TXN_READY, cpu_set_t, ghost_ioc_commit_txn, GHOST_IOC_COMMIT_TXN_C, ghost_txn_state_GHOST_TXN_NO_AGENT, ghost_txn_state_GHOST_TXN_TARGET_ONCPU, ghost_txn_state_GHOST_TXN_COMPLETE};
+use crate::{
+    cpu_set_t, ghost_ioc_commit_txn, ghost_txn, ghost_txn_state,
+    ghost_txn_state_GHOST_TXN_COMPLETE, ghost_txn_state_GHOST_TXN_NO_AGENT,
+    ghost_txn_state_GHOST_TXN_READY, ghost_txn_state_GHOST_TXN_TARGET_ONCPU, gtid::Gtid,
+    GHOST_IOC_COMMIT_TXN_C,
+};
 
 pub struct RunRequestOption {
     pub target: Gtid,
@@ -33,7 +38,7 @@ impl Default for RunRequestOption {
 pub struct RunRequest {
     pub txn: *mut ghost_txn,
     pub allow_txn_target_on_cpu: bool,
-    pub cpu: i32
+    pub cpu: i32,
 }
 
 impl RunRequest {
@@ -67,7 +72,7 @@ impl RunRequest {
     }
 
     pub fn sync_group_owner_get(&self) -> i32 {
-        unsafe {(*self.txn).u.sync_group_owner}
+        unsafe { (*self.txn).u.sync_group_owner }
     }
 
     pub fn sync_group_owned(&self) -> bool {
@@ -89,7 +94,6 @@ impl RunRequest {
     pub fn commit(&self, ctl_fd: i32) -> bool {
         if self.is_open() {
             let res = unsafe {
-
                 let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
                 CPU_ZERO(&mut cpuset);
                 CPU_SET(self.cpu as usize, &mut cpuset);
@@ -97,7 +101,7 @@ impl RunRequest {
                 let mut data = ghost_ioc_commit_txn {
                     mask_ptr: &mut cpuset as *mut _ as *mut cpu_set_t,
                     mask_len: std::mem::size_of_val(&cpuset) as u32,
-                    flags: 0
+                    flags: 0,
                 };
                 libc::ioctl(ctl_fd, GHOST_IOC_COMMIT_TXN_C, &mut data as *mut _)
             };

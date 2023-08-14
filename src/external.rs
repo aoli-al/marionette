@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicI64};
+use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64};
 
 use crate::{__IncompleteArrayField, ghost_msg};
 

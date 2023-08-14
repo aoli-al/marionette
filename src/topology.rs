@@ -95,7 +95,7 @@ impl CpuList {
     pub fn from_cpuset(num_cpus: i32, cpus: &libc::cpu_set_t) -> Self {
         let mut cpu_list = CpuList::new(num_cpus);
         for cpu in 0..libc::CPU_SETSIZE {
-            if unsafe {libc::CPU_ISSET(cpu as usize, cpus)} {
+            if unsafe { libc::CPU_ISSET(cpu as usize, cpus) } {
                 cpu_list.set(cpu);
             }
         }
@@ -305,7 +305,10 @@ impl Topology {
                 assert_eq!(&cpus[sibling as usize].siblings, &cpus[cpu].siblings);
             }
             for l3_sibling in &cpus[cpu].l3_siblings {
-                assert_eq!(&cpus[l3_sibling as usize].l3_siblings, &cpus[cpu].l3_siblings);
+                assert_eq!(
+                    &cpus[l3_sibling as usize].l3_siblings,
+                    &cpus[cpu].l3_siblings
+                );
             }
         }
 

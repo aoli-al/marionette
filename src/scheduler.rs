@@ -17,7 +17,8 @@ use crate::{
     ghost::StatusWordTable,
     ghost_ioc_sw_get_info, ghost_msg_src, ghost_type_GHOST_AGENT,
     gtid::Gtid,
-    GHOST_MAX_QUEUE_ELEMS, requester::RunRequest,
+    requester::RunRequest,
+    GHOST_MAX_QUEUE_ELEMS,
 };
 
 pub struct StatusWord {
@@ -51,10 +52,9 @@ impl StatusWord {
     }
 
     pub fn boosted_priority(&self) -> bool {
-        let res = unsafe {(*self.sw).flags.load(Ordering::SeqCst) };
+        let res = unsafe { (*self.sw).flags.load(Ordering::SeqCst) };
         res & GHOST_SW_BOOST_PRIO != 0
     }
-
 }
 
 pub struct Task {
@@ -145,15 +145,14 @@ impl<'a> AgentManager<'a> {
     }
 }
 
-
 pub struct Scheduler {
-    run_queue: HashSet<Gtid>
+    run_queue: HashSet<Gtid>,
 }
 
 impl Scheduler {
     pub fn new() -> Self {
         Self {
-            run_queue: HashSet::new()
+            run_queue: HashSet::new(),
         }
     }
     pub fn add_task(&mut self, id: &Gtid) {

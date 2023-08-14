@@ -1,4 +1,7 @@
-use std::{sync::atomic::{AtomicUsize, Ordering, AtomicPtr}, arch::asm};
+use std::{
+    arch::asm,
+    sync::atomic::{AtomicPtr, AtomicUsize, Ordering},
+};
 
 #[macro_export]
 macro_rules! roundup2 {

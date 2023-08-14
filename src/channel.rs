@@ -37,26 +37,26 @@ impl Channel {
             assert!(header != MAP_FAILED as *mut _);
             let elems = (*header).nelems;
 
-            let mut wakeup = ghost_agent_wakeup {
-                cpu,
-                prio: 0
-            };
+            let mut wakeup = ghost_agent_wakeup { cpu, prio: 0 };
             let mut data = ghost_ioc_config_queue_wakeup {
                 qfd: fd,
                 w: &mut wakeup as *mut _,
                 ninfo: 1,
-                flags: 0
+                flags: 0,
             };
             let wfd = libc::ioctl(ctl_fd, GHOST_IOC_CONFIG_QUEUE_WAKEUP_C, &mut data as *mut _);
             assert_eq!(wfd, 0);
-            Self { map_size, fd, header, elems }
+            Self {
+                map_size,
+                fd,
+                header,
+                elems,
+            }
         }
     }
 
     pub fn set_default_queue(&self, ctl_fd: i32) {
-        let mut data = ghost_ioc_set_default_queue {
-            fd: self.fd
-        };
+        let mut data = ghost_ioc_set_default_queue { fd: self.fd };
 
         unsafe {
             let res = libc::ioctl(ctl_fd, GHOST_IOC_SET_DEFAULT_QUEUE_C, &mut data as *mut _);
@@ -67,16 +67,14 @@ impl Channel {
     pub fn associate_task(&self, id: gtid::Gtid, barrier: u32, ctr_fd: i32) -> i32 {
         let msg_src = ghost_msg_src {
             type_: ghost_type_GHOST_TASK,
-            arg: id.gtid_raw as u64
+            arg: id.gtid_raw as u64,
         };
         let mut data = ghost_ioc_assoc_queue {
             fd: self.fd,
             src: msg_src,
             barrier,
-            flags: 0
+            flags: 0,
         };
-        unsafe {
-            libc::ioctl(ctr_fd, GHOST_IOC_ASSOC_QUEUE_C, &mut data as *mut _)
-        }
+        unsafe { libc::ioctl(ctr_fd, GHOST_IOC_ASSOC_QUEUE_C, &mut data as *mut _) }
     }
 }
