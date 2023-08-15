@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::gtid::Gtid;
 
 use rand::seq::SliceRandom;
-use rand::{rngs::ThreadRng, Rng, RngCore};
+use rand::RngCore;
 
 use super::Scheduler;
 

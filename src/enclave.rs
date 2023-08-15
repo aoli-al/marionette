@@ -9,7 +9,6 @@ use libc::epoll_ctl;
 use libc::epoll_event;
 use libc::sched_getaffinity;
 use libc::MAP_FAILED;
-use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Error;
@@ -75,10 +74,10 @@ pub fn create_and_attach_to_enclave() -> Result<(PathBuf, File), ()> {
         .read(true)
         .open(ctl_path)
         .expect("Failed to open enclave");
-    ctl_file.seek(std::io::SeekFrom::Start(0));
+    ctl_file.seek(std::io::SeekFrom::Start(0)).expect("Failed to seek");
     const U64_IN_ASCII_BYTES: usize = 20 + 2 + 1 + 9;
     let mut buf = [0u8; U64_IN_ASCII_BYTES];
-    ctl_file.read_exact(&mut buf);
+    ctl_file.read_exact(&mut buf).expect("Failed to read");
     let id = atoi::<u64>(&buf).expect("Failed to parse int");
     let dir_path = PathBuf::from(&GOAST_FS_MOUNT).join(format!("enclave_{}", id));
 
