@@ -11,7 +11,6 @@ use std::{
 };
 
 use libc::{ENODEV, ENOENT, ESTALE};
-use nix::sys::ptrace::Request;
 
 use super::*;
 use crate::{
@@ -22,7 +21,7 @@ use crate::{
     gtid::{self, Gtid},
     message::{payload, payload_task_new_msg, Message},
     requester::{RunRequest, RunRequestOption},
-    scheduler::{AgentManager, Scheduler, StatusWord, Task},
+    scheduler::{AgentManager, StatusWord, Task, TaskState}, schedulers::{basic_scheduler::{BaseScheduler}, Scheduler, pct::PctScheduler},
 };
 
 pub type Notification = Arc<(Mutex<bool>, Condvar)>;
@@ -61,9 +60,11 @@ pub struct Agent<'a> {
     gtid: gtid::Gtid,
     pub word_table: &'a StatusWordTable,
     ctl_fd: i32,
-    tasks: HashMap<Gtid, Task>,
-    scheduler: Scheduler,
+    tasks: Vec<Task>,
+    scheduler: Box<dyn Scheduler>,
     run_request: RunRequest,
+    current_task: Option<Gtid>,
+    current_parent_gtid: u64
 }
 
 unsafe impl<'a> Sync for Agent<'a> {}
@@ -99,9 +100,11 @@ impl<'a> Agent<'a> {
             gtid,
             word_table,
             ctl_fd,
-            tasks: HashMap::new(),
-            scheduler: Scheduler::new(),
+            tasks: Vec::new(),
+            scheduler: Box::new(PctScheduler::new(5)),
             run_request,
+            current_task: None,
+            current_parent_gtid: 0
         };
         agent
     }
@@ -122,22 +125,25 @@ impl<'a> Agent<'a> {
     fn schedule(&mut self, agent_barrier: u32) {
         let boosted_priority = self.status_word.boosted_priority();
         let next = if !boosted_priority {
-            self.scheduler.get_next()
+            let runnable = self.tasks.iter().filter(|it| it.state == TaskState::Runnable).map(|it| it.gtid).collect();
+            self.scheduler.next_task(runnable, self.current_task)
         } else {
             None
         };
         if let Some(gtid) = next {
-            println!("Scheduled! {}", gtid);
+            let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
             self.run_request.open(RunRequestOption {
                 target: gtid,
-                target_barrier: self.tasks[&gtid].seqnum.load(Ordering::SeqCst),
+                target_barrier: task.seqnum.load(Ordering::SeqCst),
                 agent_barrier: agent_barrier,
                 commit_flags: COMMIT_AT_TXN_COMMIT as u8,
                 ..Default::default()
             });
 
             if !self.run_request.commit(self.ctl_fd) {
-                self.scheduler.add_task(&gtid);
+                task.state = TaskState::Runnable;
+            } else {
+                self.current_task = Some(gtid);
             }
         } else {
             let mut flags = 0;
@@ -185,6 +191,14 @@ impl<'a> Agent<'a> {
         let gtid = msg.get_gtid();
         if msg.get_type() == MSG_TASK_NEW {
             let payload = msg.get_payload_as::<ghost_msg_payload_task_new>();
+            let parent_gtid = unsafe { payload.read_unaligned().parent_gtid };
+            if parent_gtid != self.current_parent_gtid {
+                println!("A new process is created");
+                self.tasks.clear();
+                self.current_parent_gtid = parent_gtid;
+                self.current_task = None;
+                self.scheduler.new_execution();
+            }
             if !self.create_task(gtid, unsafe { payload.read_unaligned().sw_info }) {
                 println!("Error: task exists: {}", gtid);
                 return;
@@ -232,7 +246,8 @@ impl<'a> Agent<'a> {
         }
 
         if update_seqnum {
-            (*self.tasks.get_mut(&gtid).unwrap().seqnum.get_mut()) += 1;
+            let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+            (*task.seqnum.get_mut()) += 1;
         }
     }
 
@@ -255,7 +270,8 @@ impl<'a> Agent<'a> {
     }
 
     pub fn task_preempted(&mut self, gtid: Gtid, msg: &Message) {
-        self.scheduler.add_task(&gtid);
+        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+        task.state = TaskState::Runnable;
         let payload = msg.get_payload_as::<ghost_msg_payload_task_preempt>();
         if unsafe { payload.read_unaligned().from_switchto } != 0 {
             let cpu = unsafe { payload.read_unaligned().cpu };
@@ -264,11 +280,13 @@ impl<'a> Agent<'a> {
     }
 
     pub fn task_switchto(&mut self, gtid: Gtid, msg: &Message) {
-        self.scheduler.remove_task(&gtid);
+        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+        task.state = TaskState::Blocked;
     }
 
     pub fn task_blocked(&mut self, gtid: Gtid, msg: &Message) {
-        self.scheduler.remove_task(&gtid);
+        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+        task.state = TaskState::Blocked;
         let payload = msg.get_payload_as::<ghost_msg_payload_task_blocked>();
         if unsafe { payload.read_unaligned().from_switchto } != 0 {
             let cpu = unsafe { payload.read_unaligned().cpu };
@@ -277,7 +295,8 @@ impl<'a> Agent<'a> {
     }
 
     pub fn task_yield(&mut self, gtid: Gtid, msg: &Message) {
-        self.scheduler.add_task(&gtid);
+        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+        task.state = TaskState::Runnable;
         let payload = msg.get_payload_as::<ghost_msg_payload_task_yield>();
         if unsafe { payload.read_unaligned().from_switchto } != 0 {
             let cpu = unsafe { payload.read_unaligned().cpu };
@@ -286,18 +305,18 @@ impl<'a> Agent<'a> {
     }
 
     pub fn task_departed(&mut self, gtid: Gtid, msg: &Message) {
-        self.scheduler.remove_task(&gtid);
+        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+        task.state = TaskState::Blocked;
         let payload = msg.get_payload_as::<ghost_msg_payload_task_departed>();
         if unsafe { payload.read_unaligned().from_switchto } != 0 {
             let cpu = unsafe { payload.read_unaligned().cpu };
             self.ping(cpu);
         }
-        self.tasks.remove(&gtid);
     }
 
     pub fn task_dead(&mut self, gtid: Gtid, msg: &Message) {
-        self.scheduler.remove_task(&gtid);
-        self.tasks.remove(&gtid);
+        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+        task.state = TaskState::Blocked;
     }
 
     pub fn discover_tasks(&mut self) {
@@ -333,8 +352,8 @@ impl<'a> Agent<'a> {
                 let err = Error::last_os_error().raw_os_error().unwrap();
                 match err {
                     ENOENT => {
-                        if self.tasks.contains_key(&id) {
-                            self.tasks.remove(&id);
+                        if let Some(task) = self.tasks.iter_mut().find(|it| it.gtid == id) {
+                            task.state = TaskState::Blocked;
                         } else {
                             println!("Error: Already had task for gtid {}", id);
                         }
@@ -405,23 +424,23 @@ impl<'a> Agent<'a> {
     }
 
     fn create_task(&mut self, id: Gtid, swi: ghost_sw_info) -> bool {
-        if self.tasks.contains_key(&id) {
+        if self.tasks.iter().any(|it| it.gtid == id) {
             return false;
         }
-        self.tasks.insert(
-            id,
+        self.tasks.push(
             Task {
                 gtid: id,
                 status_word: StatusWord::new(id, self.word_table, swi),
                 seqnum: AtomicU32::new(0),
                 cpu: -1,
+                state: TaskState::Blocked
             },
         );
         true
     }
 
     pub fn task_new(&mut self, gtid: Gtid, msg: &Message) {
-        let task = self.tasks.get_mut(&gtid).unwrap();
+        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         let synth = msg.get_payload_as::<ghost_msg_payload_task_new>();
         task.seqnum.store(msg.get_seqnum(), Ordering::SeqCst);
         if unsafe { synth.read_unaligned().runnable } != 0 {
@@ -432,14 +451,14 @@ impl<'a> Agent<'a> {
             );
             assert!(res >= 0);
             task.cpu = self.cpu;
-            self.scheduler.add_task(&task.gtid);
+            task.state = TaskState::Runnable;
             self.ping(self.cpu as i32);
         }
     }
 
     pub fn task_runnable(&mut self, gtid: Gtid, msg: &Message) {
-        let task = self.tasks.get_mut(&gtid).unwrap();
-        self.scheduler.add_task(&gtid);
+        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+        task.state = TaskState::Runnable;
         println!(
             "msg: {}, task: {}",
             msg.get_seqnum(),

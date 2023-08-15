@@ -10,8 +10,8 @@ use std::{
 };
 
 use crate::{
-    agent::{Agent, Notification, NotificationTrait},
-    channel::{self, Channel},
+    agent::{Agent},
+    channel::{Channel},
     enclave::{Enclave, SafeEnclave},
     external::safe_ghost_status_word,
     ghost::StatusWordTable,
@@ -57,22 +57,22 @@ impl StatusWord {
     }
 }
 
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum TaskState {
+    Runnable,
+    Blocked,
+}
+
+
 pub struct Task {
     pub gtid: Gtid,
     pub status_word: StatusWord,
     pub seqnum: AtomicU32,
     pub cpu: i32,
+    pub state: TaskState
 }
 
-struct TaskAllocator {
-    task_map: HashMap<i64, Task>,
-}
-
-impl TaskAllocator {
-    pub fn get_task(&mut self, gtid: Gtid) -> Option<&mut Task> {
-        self.task_map.get_mut(&gtid.gtid_raw)
-    }
-}
 
 pub struct AgentManager<'a> {
     pub tasks: HashMap<usize, Vec<Task>>,
@@ -132,9 +132,7 @@ impl<'a> AgentManager<'a> {
                     init_clone.wait();
 
                     println!("Init done");
-                    unsafe {
-                        agent.run();
-                    }
+                    agent.run();
                 });
             }
         });
@@ -142,30 +140,5 @@ impl<'a> AgentManager<'a> {
 
     pub fn tasks_of(&self, cpu: usize) -> &Vec<Task> {
         self.tasks.get(&cpu).unwrap()
-    }
-}
-
-pub struct Scheduler {
-    run_queue: HashSet<Gtid>,
-}
-
-impl Scheduler {
-    pub fn new() -> Self {
-        Self {
-            run_queue: HashSet::new(),
-        }
-    }
-    pub fn add_task(&mut self, id: &Gtid) {
-        self.run_queue.insert(*id);
-    }
-
-    pub fn get_next(&mut self) -> Option<Gtid> {
-        let elem = self.run_queue.iter().next()?.clone();
-        self.run_queue.remove(&elem);
-        Some(elem)
-    }
-
-    pub fn remove_task(&mut self, id: &Gtid) {
-        self.run_queue.retain(|&x| x != *id);
     }
 }

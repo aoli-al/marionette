@@ -15,5 +15,6 @@ pub mod scheduler;
 pub mod task;
 pub mod topology;
 pub mod utils;
+pub mod schedulers;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
