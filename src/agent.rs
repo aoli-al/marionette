@@ -114,7 +114,7 @@ impl<'a> Agent<'a> {
             let agent_barrier = unsafe { (*self.status_word.sw).barrier.load(Ordering::SeqCst) };
 
             while let Some(m) = self.peek() {
-                println!("start dispatch");
+                log::info!("Message received: {}", m);
                 self.dispatch(&m);
                 self.consume(m);
             }
@@ -181,7 +181,6 @@ impl<'a> Agent<'a> {
     }
 
     fn dispatch(&mut self, msg: &Message) {
-        println!("new message: {}", msg.get_type());
         if msg.get_type() == MSG_NOP {
             return;
         }
@@ -193,14 +192,14 @@ impl<'a> Agent<'a> {
             let payload = msg.get_payload_as::<ghost_msg_payload_task_new>();
             let parent_gtid = unsafe { payload.read_unaligned().parent_gtid };
             if parent_gtid != self.current_parent_gtid {
-                println!("A new process is created");
+                log::info!("New process detected: reset the scheduler");
                 self.tasks.clear();
                 self.current_parent_gtid = parent_gtid;
                 self.current_task = None;
                 self.scheduler.new_execution();
             }
             if !self.create_task(gtid, unsafe { payload.read_unaligned().sw_info }) {
-                println!("Error: task exists: {}", gtid);
+                log::error!("Failed to create task {}: task exists", gtid);
                 return;
             }
         }
@@ -355,7 +354,7 @@ impl<'a> Agent<'a> {
                         if let Some(task) = self.tasks.iter_mut().find(|it| it.gtid == id) {
                             task.state = TaskState::Blocked;
                         } else {
-                            println!("Error: Already had task for gtid {}", id);
+                            log::error!("Failed to find task {}: ENOENT", id);
                         }
                         return;
                     }
@@ -373,7 +372,7 @@ impl<'a> Agent<'a> {
                         }
 
                         if has_estale {
-                            println!("Got repeated ESTAL: {}, {}", id, sw_flags);
+                            log::error!("Repeated ESTAL: {}, {}", id, sw_flags);
                         }
                         has_estale = true;
                         continue;
@@ -418,7 +417,7 @@ impl<'a> Agent<'a> {
 
         let msg = Message::from_raw(&mut synth as *mut payload_task_new_msg as *mut ghost_msg);
         if !self.create_task(id, swi) {
-            println!("Error: task exists: {}", id);
+            log::error!("Failed to create task {}: task exists", id);
         }
         self.task_new(id, &msg);
     }
@@ -459,16 +458,10 @@ impl<'a> Agent<'a> {
     pub fn task_runnable(&mut self, gtid: Gtid, msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         task.state = TaskState::Runnable;
-        println!(
-            "msg: {}, task: {}",
-            msg.get_seqnum(),
-            task.seqnum.load(Ordering::SeqCst)
-        );
         if task.cpu < 0 {
             let res = self
                 .channel
                 .associate_task(task.gtid, msg.get_seqnum(), self.ctl_fd);
-            println!("error: {}, {}", res, Error::last_os_error());
             assert!(res >= 0);
             task.cpu = self.cpu;
             self.ping(self.cpu as i32);

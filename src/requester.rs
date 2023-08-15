@@ -107,14 +107,13 @@ impl RunRequest {
             };
             assert_eq!(res, 0);
         } else {
-            println!("request is not open?");
+            log::error!("Cannot open closed commits");
         }
 
         while !self.is_committed() {
             hint::spin_loop();
         }
         let state = self.state();
-        println!("State: {}", state);
         state == ghost_txn_state_GHOST_TXN_COMPLETE
     }
 }

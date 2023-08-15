@@ -13,6 +13,7 @@ regex = "1.9.3"
 nix = { version = "0.26.2", features = ["sched", "process", "event"] }
 signal-hook = "0.3.17"
 rand = "0.8.5"
+log = "0.4.20"
 
 [toolchain]
 channel = "nightly"

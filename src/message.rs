@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{
     ghost_msg, ghost_msg_payload_task_new, gtid::Gtid, _MSG_CPU_FIRST, _MSG_CPU_LAST,
     _MSG_TASK_FIRST, _MSG_TASK_LAST,
@@ -13,6 +15,12 @@ pub struct payload<T> {
 pub type payload_task_new_msg = payload<ghost_msg_payload_task_new>;
 pub struct Message {
     pub msg: *mut ghost_msg,
+}
+
+impl Display for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.get_type())
+    }
 }
 
 impl Message {

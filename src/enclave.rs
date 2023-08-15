@@ -106,7 +106,6 @@ pub fn get_cpu_data_region(dir_path: &PathBuf) -> *mut ghost_cpu_data {
         .expect("Failed to open CPU data");
     let data_region_size = cpu_data.metadata().unwrap().len();
     let fd = cpu_data.as_raw_fd();
-    println!("{}, {}", data_region_size, fd);
     unsafe {
         let res = libc::mmap(
             std::ptr::null_mut(),
@@ -128,12 +127,11 @@ pub fn set_cpu_mask(dir_path: &PathBuf, enclave_cpus: &CpuList) {
         .open(dir_path.join("cpumask"))
         .expect("Failed to open CPU mask");
     let cpu_mask = enclave_cpus.cpu_mask_string();
-    println!("cpumask: {}", cpu_mask);
     for _ in 0..10 {
         match cpu_mask_file.write(cpu_mask.as_bytes()) {
             Ok(len) if len == cpu_mask.len() => break,
             _ => {
-                println!("write cpu mask failed");
+                log::error!("Failed to write cpu mask");
                 thread::sleep(Duration::from_millis(50));
             }
         }
@@ -185,7 +183,7 @@ impl SafeEnclave {
                     break;
                 }
                 Err(e) => {
-                    println!("{}", e);
+                    log::error!("Failed to assign agent to channel {}, {}: {}", cpu, queue_fd, e);
                     assert_eq!(Error::last_os_error().raw_os_error().unwrap(), libc::EBUSY);
                 }
                 _ => {}
@@ -258,7 +256,6 @@ impl SafeEnclave {
         let len = fd.read(&mut buf).expect("Failed to read from agent_online");
         assert!(len > 0);
         let one_or_zero = atoi::<i32>(&buf).expect("Failed to parse int");
-        println!("One or zero: {}", one_or_zero);
         if one_or_zero != until {
             while unsafe {
                 libc::epoll_wait(
@@ -272,7 +269,6 @@ impl SafeEnclave {
                 let err = Error::last_os_error();
                 assert_eq!(err.raw_os_error().unwrap(), libc::EINTR);
             }
-            println!("One or zero: {}", one_or_zero);
         }
     }
 }

@@ -132,6 +132,7 @@ impl<'a> AgentManager<'a> {
                     init_clone.wait();
 
                     println!("Init done");
+                    log::info!("Agent initialization done.");
                     agent.run();
                 });
             }
