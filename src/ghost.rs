@@ -1,21 +1,13 @@
-use libc::SIGINT;
-use signal_hook::iterator::Signals;
-
 use crate::external::safe_ghost_status_word;
 
 use super::*;
-use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::Ordering;
 use std::{
     fs::{File, OpenOptions},
-    os::fd::{AsFd, AsRawFd},
+    os::fd::AsRawFd,
     path::PathBuf,
 };
-
-pub struct Ghost {
-    word_stable: StatusWordTable,
-}
 
 pub struct StatusWordTable {
     pub f: File,
@@ -78,21 +70,5 @@ impl StatusWordTable {
             }
             f(sw, (*self.header).id, i);
         }
-    }
-}
-
-pub struct GhostSignals<'a> {
-    handlers: HashMap<i32, &'a fn(i32) -> bool>,
-}
-
-impl<'a> GhostSignals<'a> {
-    pub fn new() -> Self {
-        let signal = Self {
-            handlers: HashMap::new(),
-        };
-
-        let mut signals = Signals::new(&[SIGINT]).expect("Can not register signals");
-
-        signal
     }
 }

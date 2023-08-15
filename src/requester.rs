@@ -1,11 +1,11 @@
 use std::hint;
 
-use libc::{system, CPU_SET, CPU_ZERO};
+use libc::{CPU_SET, CPU_ZERO};
 
 use crate::{
     cpu_set_t, ghost_ioc_commit_txn, ghost_txn, ghost_txn_state,
-    ghost_txn_state_GHOST_TXN_COMPLETE, ghost_txn_state_GHOST_TXN_NO_AGENT,
-    ghost_txn_state_GHOST_TXN_READY, ghost_txn_state_GHOST_TXN_TARGET_ONCPU, gtid::Gtid,
+    ghost_txn_state_GHOST_TXN_COMPLETE,
+    ghost_txn_state_GHOST_TXN_READY, gtid::Gtid,
     GHOST_IOC_COMMIT_TXN_C,
 };
 

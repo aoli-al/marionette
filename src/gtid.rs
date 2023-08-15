@@ -3,9 +3,8 @@ use std::{
     fs::OpenOptions,
     hash::Hash,
     hash::Hasher,
-    io::{self, BufRead, BufReader, Read},
+    io::{self, Read},
     path::PathBuf,
-    thread,
 };
 
 #[derive(Clone, Copy)]

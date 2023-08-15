@@ -44,7 +44,7 @@ impl Scheduler for PctScheduler {
         }
     }
 
-    fn next_task(&mut self, runnable_tasks: Vec<Gtid>, current_task: Option<Gtid>) -> Option<Gtid> {
+    fn next_task(&mut self, runnable_tasks: Vec<Gtid>, _current_task: Option<Gtid>) -> Option<Gtid> {
         if runnable_tasks.is_empty() {
             return None;
         }

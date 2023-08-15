@@ -1,15 +1,13 @@
-use std::os::fd::{AsFd, AsRawFd};
+use std::os::fd::AsRawFd;
 
 use libc::MAP_FAILED;
 
 use super::*;
-use crate::enclave::{Enclave, SafeEnclave};
+use crate::enclave::SafeEnclave;
 
 pub struct Channel {
-    map_size: usize,
     pub fd: i32,
     pub header: *mut ghost_queue_header,
-    elems: u32,
 }
 
 impl Channel {
@@ -35,7 +33,6 @@ impl Channel {
                 0,
             ) as *mut ghost_queue_header;
             assert!(header != MAP_FAILED as *mut _);
-            let elems = (*header).nelems;
 
             let mut wakeup = ghost_agent_wakeup { cpu, prio: 0 };
             let mut data = ghost_ioc_config_queue_wakeup {
@@ -47,10 +44,8 @@ impl Channel {
             let wfd = libc::ioctl(ctl_fd, GHOST_IOC_CONFIG_QUEUE_WAKEUP_C, &mut data as *mut _);
             assert_eq!(wfd, 0);
             Self {
-                map_size,
                 fd,
                 header,
-                elems,
             }
         }
     }

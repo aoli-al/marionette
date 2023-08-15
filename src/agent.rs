@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     ffi::CString,
     io::Error,
     mem::size_of,
@@ -15,13 +14,13 @@ use libc::{ENODEV, ENOENT, ESTALE};
 use super::*;
 use crate::{
     channel::Channel,
-    enclave::{Enclave, SafeEnclave},
+    enclave::SafeEnclave,
     external::{safe_ghost_ring, safe_ghost_status_word},
     ghost::StatusWordTable,
     gtid::{self, Gtid},
-    message::{payload, payload_task_new_msg, Message},
+    message::{payload_task_new_msg, Message},
     requester::{RunRequest, RunRequestOption},
-    scheduler::{AgentManager, StatusWord, Task, TaskState}, schedulers::{basic_scheduler::{BaseScheduler}, Scheduler, pct::PctScheduler},
+    scheduler::{StatusWord, Task, TaskState}, schedulers::{Scheduler, pct::PctScheduler},
 };
 
 pub type Notification = Arc<(Mutex<bool>, Condvar)>;
@@ -52,12 +51,10 @@ impl NotificationTrait for Notification {
 }
 
 pub struct Agent<'a> {
-    safe_e: &'a SafeEnclave,
     status_word: StatusWord,
     cpu: i32,
     pub channel: Channel,
     pub finished: Notification,
-    gtid: gtid::Gtid,
     pub word_table: &'a StatusWordTable,
     ctl_fd: i32,
     tasks: Vec<Task>,
@@ -80,11 +77,9 @@ impl<'a> Agent<'a> {
     ) -> Self {
         let channel = Channel::new(GHOST_MAX_QUEUE_ELEMS as usize, 0, cpu, safe_e);
         unsafe {
-            let s = CString::new(format!("ap_task_{}", cpu)).unwrap().as_ptr();
-            let ret = libc::prctl(libc::PR_SET_NAME, s, 0);
+            let ret = libc::prctl(libc::PR_SET_NAME, CString::new(format!("ap_task_{}", cpu)).unwrap().as_ptr(), 0);
             assert_eq!(ret, 0);
         }
-        let gtid = gtid::current();
         safe_e.wait_for_agent_online_value(0);
         safe_e.sched_agent_enter_ghost(cpu, channel.fd);
         let status_word = StatusWord::from_world_table(
@@ -92,12 +87,10 @@ impl<'a> Agent<'a> {
             word_table,
         );
         let agent = Self {
-            safe_e,
             status_word,
             cpu,
             channel,
             finished: Default::default(),
-            gtid,
             word_table,
             ctl_fd,
             tasks: Vec::new(),
@@ -278,7 +271,7 @@ impl<'a> Agent<'a> {
         }
     }
 
-    pub fn task_switchto(&mut self, gtid: Gtid, msg: &Message) {
+    pub fn task_switchto(&mut self, gtid: Gtid, _msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         task.state = TaskState::Blocked;
     }
@@ -313,7 +306,7 @@ impl<'a> Agent<'a> {
         }
     }
 
-    pub fn task_dead(&mut self, gtid: Gtid, msg: &Message) {
+    pub fn task_dead(&mut self, gtid: Gtid, _msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         task.state = TaskState::Blocked;
     }

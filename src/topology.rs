@@ -1,16 +1,14 @@
 use crate::external;
-use libc::CPU_SETSIZE;
+
 use nix::sched::CpuSet;
 use regex::Regex;
-use std::borrow::BorrowMut;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fs::read_to_string;
-use std::io::{BufRead, BufReader};
-use std::{fmt::format, fs::OpenOptions, path::PathBuf};
 
-const TOPOLOGY_TEST_SUBPATH: &str = "topology_test";
-const TOPOLOGY_TEST_SYS_SUBPATH: &str = "sys/devices/system";
+
+use std::collections::HashMap;
+
+use std::io::{BufRead, BufReader};
+use std::{fs::OpenOptions, path::PathBuf};
+
 const MAX_CPUS: usize = 512;
 const INTS_BITS: i32 = (8 * std::mem::size_of::<u64>()) as i32;
 const MAP_CAPACITY: usize = MAX_CPUS / INTS_BITS as usize;
@@ -36,14 +34,13 @@ impl<'a> CpuListIter<'a> {
 
     pub fn find_next_set_bit(&mut self) {
         let mut map_idx = self.id / INTS_BITS;
-        let mut bit_offset = self.id & (INTS_BITS - 1);
-        let mut word = 0;
+        let bit_offset = self.id & (INTS_BITS - 1);
 
         if map_idx >= self.map.map_size {
             self.id = self.map.num_cpus;
             return;
         }
-        word = self.map.bitmap[map_idx as usize];
+        let mut word = self.map.bitmap[map_idx as usize];
         word &= !0u64 << bit_offset;
 
         while map_idx < self.map.map_size {
@@ -52,7 +49,7 @@ impl<'a> CpuListIter<'a> {
                 return;
             }
             map_idx += 1;
-            if (map_idx < self.map.map_size) {
+            if map_idx < self.map.map_size {
                 word = self.map.bitmap[map_idx as usize];
             }
         }
@@ -111,7 +108,7 @@ impl CpuList {
     }
 
     pub fn set(&mut self, id: i32) {
-        self.bitmap[(id / INTS_BITS) as usize] |= (1u64 << (id % INTS_BITS));
+        self.bitmap[(id / INTS_BITS) as usize] |= 1u64 << (id % INTS_BITS);
     }
     pub fn is_set(&self, id: i32) -> bool {
         (self.bitmap[(id / INTS_BITS) as usize] & (1u64 << (id % INTS_BITS))) != 0
@@ -191,9 +188,6 @@ impl<'a> IntoIterator for &'a CpuList {
 pub struct Cpu {}
 
 pub struct CpuRep {
-    cpu: i32,
-    core: i32,
-    smt_idx: usize,
     siblings: CpuList,
     l3_siblings: CpuList,
     numa_node: usize,
@@ -275,18 +269,13 @@ impl Topology {
             num_cpus,
         );
 
-        let mut cpus: Vec<CpuRep> = (0..num_cpus)
+        let cpus: Vec<CpuRep> = (0..num_cpus)
             .map(|i| {
                 let cpu = i;
                 let sls = &siblings[&i];
                 let l3_sls = &l3_siblings[&i];
-                let core = sls.begin().next().unwrap();
                 let numa_node = unsafe { external::numa_node_of_cpu(cpu as libc::c_int) as usize };
-                let smt_idx = sls.into_iter().position(|i| i == cpu).unwrap();
                 CpuRep {
-                    cpu: cpu,
-                    core: core,
-                    smt_idx: smt_idx,
                     siblings: sls.clone(),
                     l3_siblings: l3_sls.clone(),
                     numa_node: numa_node,

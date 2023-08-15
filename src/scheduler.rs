@@ -1,36 +1,34 @@
 use super::*;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     os::fd::AsRawFd,
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc, Barrier, Mutex,
     },
     thread,
 };
 
 use crate::{
-    agent::{Agent},
-    channel::{Channel},
-    enclave::{Enclave, SafeEnclave},
+    agent::Agent,
+    channel::Channel,
+    enclave::Enclave,
     external::safe_ghost_status_word,
     ghost::StatusWordTable,
     ghost_ioc_sw_get_info, ghost_msg_src, ghost_type_GHOST_AGENT,
     gtid::Gtid,
     requester::RunRequest,
-    GHOST_MAX_QUEUE_ELEMS,
 };
 
 pub struct StatusWord {
-    sw_info: ghost_sw_info,
     pub sw: *mut safe_ghost_status_word,
 }
 
 impl StatusWord {
-    pub fn new(owner: Gtid, word_table: &StatusWordTable, sw_info: ghost_sw_info) -> Self {
+    pub fn new(_owner: Gtid, word_table: &StatusWordTable, sw_info: ghost_sw_info) -> Self {
         unsafe {
             let sw = word_table.table.add(sw_info.index as usize);
-            Self { sw_info, sw }
+            Self { sw }
         }
     }
     pub fn from_world_table(ctl_fd: i32, word_table: &StatusWordTable) -> Self {
@@ -86,8 +84,8 @@ unsafe impl Sync for RunRequest {}
 
 impl<'a> AgentManager<'a> {
     pub fn new(enclave: &'a mut Enclave) -> Self {
-        let mut channels = HashMap::<usize, Channel>::new();
-        let mut tasks = HashMap::<usize, Vec<Task>>::new();
+        let _channels = HashMap::<usize, Channel>::new();
+        let _tasks = HashMap::<usize, Vec<Task>>::new();
         let scheduler = Self {
             tasks: HashMap::new(),
             enclave,
