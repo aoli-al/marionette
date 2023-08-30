@@ -302,6 +302,7 @@ struct ghost_msg_payload_task_blocked {
 	uint64_t gtid;
 	uint64_t runtime;	/* cumulative runtime in ns */
 	uint64_t cpu_seqnum;
+    int64_t state;
 	int cpu;
 	char from_switchto;
 };

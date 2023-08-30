@@ -65,6 +65,7 @@ pub enum TaskState {
 
 pub struct Task {
     pub gtid: Gtid,
+    pub thread_index: usize,
     pub status_word: StatusWord,
     pub seqnum: AtomicU32,
     pub cpu: i32,

@@ -36,7 +36,7 @@ impl Scheduler for BaseScheduler {
 
     fn next_task(
         &mut self,
-        runnable_tasks: Vec<Gtid>,
+        runnable_tasks: &Vec<Gtid>,
         _current_task: Option<Gtid>,
     ) -> Option<Gtid> {
         if !runnable_tasks.is_empty() {

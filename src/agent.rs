@@ -15,12 +15,12 @@ use super::*;
 use crate::{
     channel::Channel,
     enclave::SafeEnclave,
-    external::{safe_ghost_ring, safe_ghost_status_word},
+    external::{safe_ghost_ring, safe_ghost_status_word, TASK_KILLABLE},
     ghost::StatusWordTable,
     gtid::{self, Gtid},
     message::{payload_task_new_msg, Message},
     requester::{RunRequest, RunRequestOption},
-    scheduler::{StatusWord, Task, TaskState}, schedulers::{Scheduler, pct::PctScheduler},
+    scheduler::{StatusWord, Task, TaskState}, schedulers::{Scheduler, pct::PctScheduler, random::RandomScheduler},
 };
 
 pub type Notification = Arc<(Mutex<bool>, Condvar)>;
@@ -61,13 +61,18 @@ pub struct Agent<'a> {
     scheduler: Box<dyn Scheduler>,
     run_request: RunRequest,
     current_task: Option<Gtid>,
-    current_parent_gtid: u64
+    current_parent_gtid: u64,
+    thread_index: usize,
+    skip_schedule: bool,
 }
 
 unsafe impl<'a> Sync for Agent<'a> {}
 unsafe impl<'a> Send for Agent<'a> {}
 
 impl<'a> Agent<'a> {
+    // We need this for dereferencing CString.
+    // See more: https://github.com/rust-lang/rust/issues/78691
+    #[allow(temporary_cstring_as_ptr)]
     pub fn new(
         cpu: i32,
         safe_e: &'a SafeEnclave,
@@ -94,10 +99,13 @@ impl<'a> Agent<'a> {
             word_table,
             ctl_fd,
             tasks: Vec::new(),
-            scheduler: Box::new(PctScheduler::new(5)),
+            // scheduler: Box::new(PctScheduler::new(5)),
+            scheduler: Box::new(RandomScheduler::new()),
             run_request,
             current_task: None,
-            current_parent_gtid: 0
+            current_parent_gtid: 0,
+            thread_index: 0,
+            skip_schedule: false
         };
         agent
     }
@@ -107,7 +115,6 @@ impl<'a> Agent<'a> {
             let agent_barrier = unsafe { (*self.status_word.sw).barrier.load(Ordering::SeqCst) };
 
             while let Some(m) = self.peek() {
-                log::info!("Message received: {}", m);
                 self.dispatch(&m);
                 self.consume(m);
             }
@@ -117,25 +124,30 @@ impl<'a> Agent<'a> {
 
     fn schedule(&mut self, agent_barrier: u32) {
         let boosted_priority = self.status_word.boosted_priority();
-        let next = if !boosted_priority {
-            let runnable = self.tasks.iter().filter(|it| it.state == TaskState::Runnable).map(|it| it.gtid).collect();
-            self.scheduler.next_task(runnable, self.current_task)
+        let next = if !boosted_priority && !self.skip_schedule {
+            let runnable: Vec<Gtid> = self.tasks.iter().filter(|it| it.state == TaskState::Runnable).map(|it| it.gtid).collect();
+            (self.scheduler.next_task(&runnable, self.current_task), runnable.len())
         } else {
-            None
+            (None, 0)
         };
-        if let Some(gtid) = next {
+        self.skip_schedule = false;
+        if let Some(gtid) = next.0 {
             let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
             self.run_request.open(RunRequestOption {
                 target: gtid,
                 target_barrier: task.seqnum.load(Ordering::SeqCst),
                 agent_barrier: agent_barrier,
                 commit_flags: COMMIT_AT_TXN_COMMIT as u8,
+                // run_flags: (RTLA_ON_BLOCKED | RTLA_ON_PREEMPT | RTLA_ON_YIELD) as u16,
                 ..Default::default()
             });
 
             if !self.run_request.commit(self.ctl_fd) {
                 task.state = TaskState::Runnable;
             } else {
+                if self.current_task.map_or(false, |it| it != gtid) {
+                    log::info!("New thread is scheduled: {}. From {} runnable threads.", gtid, next.1);
+                }
                 self.current_task = Some(gtid);
             }
         } else {
@@ -157,8 +169,14 @@ impl<'a> Agent<'a> {
         };
         let res = unsafe { libc::ioctl(self.ctl_fd, GHOST_IOC_RUN_C, &mut data as *mut _) };
         if res != 0 {
-            let errno = Error::last_os_error().raw_os_error().unwrap();
-            assert!(errno == ESTALE || errno == ENODEV);
+            let error = Error::last_os_error();
+            let errno = error.raw_os_error().unwrap();
+            if errno == ESTALE || errno == ENODEV {
+                log::trace!("Error on yield {}", error);
+            } else {
+                log::error!("Error on yield {}", error);
+                assert!(false);
+            }
         }
     }
 
@@ -174,6 +192,7 @@ impl<'a> Agent<'a> {
     }
 
     fn dispatch(&mut self, msg: &Message) {
+        log::info!("Message received: {}", msg);
         if msg.get_type() == MSG_NOP {
             return;
         }
@@ -190,6 +209,7 @@ impl<'a> Agent<'a> {
                 self.current_parent_gtid = parent_gtid;
                 self.current_task = None;
                 self.scheduler.new_execution();
+                self.thread_index = 0;
             }
             if !self.create_task(gtid, unsafe { payload.read_unaligned().sw_info }) {
                 log::error!("Failed to create task {}: task exists", gtid);
@@ -279,9 +299,13 @@ impl<'a> Agent<'a> {
     pub fn task_blocked(&mut self, gtid: Gtid, msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         task.state = TaskState::Blocked;
-        let payload = msg.get_payload_as::<ghost_msg_payload_task_blocked>();
-        if unsafe { payload.read_unaligned().from_switchto } != 0 {
-            let cpu = unsafe { payload.read_unaligned().cpu };
+        let payload = unsafe { msg.get_payload_as::<ghost_msg_payload_task_blocked>().read_unaligned() };
+        if payload.state == TASK_KILLABLE {
+            self.skip_schedule = true;
+        }
+        log::info!("Task blocked: {}, state: {}", gtid, payload.state);
+        if payload.from_switchto != 0 {
+            let cpu = payload.cpu;
             self.ping(cpu);
         }
     }
@@ -425,9 +449,12 @@ impl<'a> Agent<'a> {
                 status_word: StatusWord::new(id, self.word_table, swi),
                 seqnum: AtomicU32::new(0),
                 cpu: -1,
-                state: TaskState::Blocked
+                state: TaskState::Blocked,
+                thread_index: self.thread_index
             },
         );
+        log::info!("New task created: {}", id);
+        self.thread_index += 1;
         true
     }
 
@@ -449,6 +476,7 @@ impl<'a> Agent<'a> {
     }
 
     pub fn task_runnable(&mut self, gtid: Gtid, msg: &Message) {
+        log::info!("Task runnable: {}", gtid);
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         task.state = TaskState::Runnable;
         if task.cpu < 0 {

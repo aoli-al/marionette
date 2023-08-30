@@ -18,7 +18,7 @@ pub static IDLE_GTID: Gtid = Gtid::new(-2);
 
 impl fmt::Display for Gtid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.gtid_raw)
+        write!(f, "{:#x}", self.gtid_raw)
     }
 }
 

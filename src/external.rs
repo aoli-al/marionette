@@ -6,6 +6,8 @@ extern "C" {
     pub fn numa_node_of_cpu(cpu: libc::c_int) -> libc::c_int;
 }
 
+pub const TASK_KILLABLE: i64 = 0x00000100 | 0x00000002;
+
 #[repr(C)]
 #[repr(align(32))]
 #[derive(Debug)]

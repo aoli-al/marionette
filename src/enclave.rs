@@ -77,7 +77,7 @@ pub fn create_and_attach_to_enclave() -> Result<(PathBuf, File), ()> {
     ctl_file.seek(std::io::SeekFrom::Start(0)).expect("Failed to seek");
     const U64_IN_ASCII_BYTES: usize = 20 + 2 + 1 + 9;
     let mut buf = [0u8; U64_IN_ASCII_BYTES];
-    ctl_file.read_exact(&mut buf).expect("Failed to read");
+    ctl_file.read(&mut buf).expect("Failed to read the buffer");
     let id = atoi::<u64>(&buf).expect("Failed to parse int");
     let dir_path = PathBuf::from(&GOAST_FS_MOUNT).join(format!("enclave_{}", id));
 
