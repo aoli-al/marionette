@@ -86,5 +86,5 @@ fn interleave_test() {
 }
 
 pub fn main() {
-    lock_test();
+    counter_test();
 }
