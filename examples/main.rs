@@ -85,6 +85,24 @@ fn interleave_test() {
     }
 }
 
+fn preemption_test() {
+    let threads = (0..3)
+        .map(|it| {
+            thread::spawn(move || {
+                for i in 0..10 {
+                    println!("{}", it);
+                    for i in 0..100000000  {
+                    }
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+}
+
 pub fn main() {
-    counter_test();
+    preemption_test();
 }

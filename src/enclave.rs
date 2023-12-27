@@ -1,5 +1,7 @@
 use crate::ghost::StatusWordTable;
+use crate::gtid::Gtid;
 use crate::requester::RunRequest;
+use crate::scheduler::Task;
 use crate::topology::CpuList;
 use crate::topology::Topology;
 
@@ -9,6 +11,8 @@ use libc::epoll_ctl;
 use libc::epoll_event;
 use libc::sched_getaffinity;
 use libc::MAP_FAILED;
+use std::ffi::CStr;
+use std::ffi::CString;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Error;
@@ -18,11 +22,12 @@ use std::io::Seek;
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
+use std::ptr::null;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-static GOAST_FS_MOUNT: &str = "/sys/fs/ghost";
+static GHOST_FS_MOUNT: &str = "/sys/fs/ghost";
 pub static GHOST_VERSION: i32 = 83;
 
 pub struct CpuDel {
@@ -41,13 +46,63 @@ pub struct SafeEnclave {
     pub cpus: Vec<i32>,
 }
 
+pub struct CpuState {
+    pub current: Option<Gtid>,
+    pub prev: Option<Gtid>,
+    pub id: i32,
+}
+
+impl CpuState {
+    pub fn clear_current(&mut self, update_prev: bool) {
+        if update_prev {
+            self.prev = self.current;
+        } else {
+            self.prev = None
+        }
+        self.current = None;
+    }
+}
+
 pub struct UnsafeEnclave {
     pub data_region: *mut ghost_cpu_data,
     pub word_table: StatusWordTable,
 }
 
+pub fn is_ghost_mounted() -> bool {
+    unsafe {
+        let file = libc::setmntent(b"/proc/self/mounts\0".as_ptr() as *const i8, b"r\0".as_ptr() as *const i8);
+
+        if file.is_null() {
+            panic!("failed to get mount description.");
+        }
+        let mut ret = false;
+        while let Some(ent) = libc::getmntent(file).as_ref() {
+            let mnt_dir = CStr::from_ptr(ent.mnt_dir).to_string_lossy();
+            let mnt_type = CStr::from_ptr(ent.mnt_type).to_string_lossy();
+
+            if mnt_dir == GHOST_FS_MOUNT && mnt_type == "ghost" {
+                ret = true;
+                break;
+            }
+        }
+        libc::endmntent(file);
+        ret
+    }
+}
+
+pub fn mount_ghost() {
+    if is_ghost_mounted() {
+        return;
+    }
+
+    unsafe {
+        libc::mount(b"ghost\0".as_ptr() as *const i8, CString::new(GHOST_FS_MOUNT).unwrap().as_ptr(), b"ghost\0".as_ptr() as *const i8, 0, null());
+    }
+}
+
 pub fn create_and_attach_to_enclave() -> Result<(PathBuf, File), ()> {
-    let ctl_path = PathBuf::from(&GOAST_FS_MOUNT).join("ctl");
+    mount_ghost();
+    let ctl_path = PathBuf::from(&GHOST_FS_MOUNT).join("ctl");
     let mut top_ctl = OpenOptions::new()
         .write(true)
         .open(ctl_path)
@@ -68,7 +123,7 @@ pub fn create_and_attach_to_enclave() -> Result<(PathBuf, File), ()> {
             }
         }
     }
-    let ctl_path = PathBuf::from(&GOAST_FS_MOUNT).join(format!("enclave_{}/ctl", e_id));
+    let ctl_path = PathBuf::from(&GHOST_FS_MOUNT).join(format!("enclave_{}/ctl", e_id));
     let mut ctl_file = OpenOptions::new()
         .write(true)
         .read(true)
@@ -79,7 +134,7 @@ pub fn create_and_attach_to_enclave() -> Result<(PathBuf, File), ()> {
     let mut buf = [0u8; U64_IN_ASCII_BYTES];
     ctl_file.read(&mut buf).expect("Failed to read the buffer");
     let id = atoi::<u64>(&buf).expect("Failed to parse int");
-    let dir_path = PathBuf::from(&GOAST_FS_MOUNT).join(format!("enclave_{}", id));
+    let dir_path = PathBuf::from(&GHOST_FS_MOUNT).join(format!("enclave_{}", id));
 
     assert!(dir_path.exists(), "Failed to find enclave dir");
     Ok((dir_path, ctl_file))
@@ -139,7 +194,7 @@ pub fn set_cpu_mask(dir_path: &PathBuf, enclave_cpus: &CpuList) {
 
 impl Enclave {
     pub fn new(topology: Topology) -> Self {
-        let (dir_path, ctl_file) = enclave::create_and_attach_to_enclave().expect("msg");
+        let (dir_path, ctl_file) = enclave::create_and_attach_to_enclave().expect("Failed to attach to enclave");
         // let abi_version = enclave::get_abi_version(&dir_path);
         let data_region = enclave::get_cpu_data_region(&dir_path);
         let word_table = ghost::StatusWordTable::new(&dir_path, 0, 0);

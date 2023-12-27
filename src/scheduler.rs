@@ -60,6 +60,8 @@ impl StatusWord {
 pub enum TaskState {
     Runnable,
     Blocked,
+    OnCpu,
+    Pending,
 }
 
 

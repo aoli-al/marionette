@@ -14,7 +14,7 @@ use libc::{ENODEV, ENOENT, ESTALE};
 use super::*;
 use crate::{
     channel::Channel,
-    enclave::SafeEnclave,
+    enclave::{SafeEnclave, CpuState},
     external::{safe_ghost_ring, safe_ghost_status_word, TASK_KILLABLE},
     ghost::StatusWordTable,
     gtid::{self, Gtid},
@@ -52,7 +52,7 @@ impl NotificationTrait for Notification {
 
 pub struct Agent<'a> {
     status_word: StatusWord,
-    cpu: i32,
+    cpu: CpuState,
     pub channel: Channel,
     pub finished: Notification,
     pub word_table: &'a StatusWordTable,
@@ -60,10 +60,8 @@ pub struct Agent<'a> {
     tasks: Vec<Task>,
     scheduler: Box<dyn Scheduler>,
     run_request: RunRequest,
-    current_task: Option<Gtid>,
     current_parent_gtid: u64,
     thread_index: usize,
-    skip_schedule: bool,
 }
 
 unsafe impl<'a> Sync for Agent<'a> {}
@@ -93,7 +91,11 @@ impl<'a> Agent<'a> {
         );
         let agent = Self {
             status_word,
-            cpu,
+            cpu: CpuState {
+                current: None,
+                prev: None,
+                id: cpu
+            },
             channel,
             finished: Default::default(),
             word_table,
@@ -102,10 +104,8 @@ impl<'a> Agent<'a> {
             // scheduler: Box::new(PctScheduler::new(5)),
             scheduler: Box::new(RandomScheduler::new()),
             run_request,
-            current_task: None,
             current_parent_gtid: 0,
             thread_index: 0,
-            skip_schedule: false
         };
         agent
     }
@@ -122,37 +122,51 @@ impl<'a> Agent<'a> {
         }
     }
 
+    fn get_next_task(&mut self) -> Option<Gtid> {
+        if self.status_word.boosted_priority() {
+            return None;
+        }
+        if let Some(prev) = self.cpu.prev  {
+            let prev_task = self.tasks.iter_mut().find(|it| it.gtid == prev).unwrap();
+            if prev_task.state == TaskState::Runnable {
+                return Some(prev);
+            } else if prev_task.state == TaskState::Pending {
+                prev_task.state = TaskState::Blocked;
+                unsafe {
+                    if prev_task.seqnum.load(Ordering::SeqCst) != (*prev_task.status_word.sw).barrier.load(Ordering::SeqCst) {
+                        log::info!("Prev task yield: {}", prev);
+                        return None;
+                    }
+                }
+            }
+        }
+        let runnable: Vec<Gtid> = self.tasks.iter().filter(|it| it.state == TaskState::Runnable).map(|it| it.gtid).collect();
+        return self.scheduler.next_task(&runnable, self.cpu.current)
+    }
+
     fn schedule(&mut self, agent_barrier: u32) {
-        let boosted_priority = self.status_word.boosted_priority();
-        let next = if !boosted_priority && !self.skip_schedule {
-            let runnable: Vec<Gtid> = self.tasks.iter().filter(|it| it.state == TaskState::Runnable).map(|it| it.gtid).collect();
-            (self.scheduler.next_task(&runnable, self.current_task), runnable.len())
-        } else {
-            (None, 0)
-        };
-        self.skip_schedule = false;
-        if let Some(gtid) = next.0 {
+        let next = self.get_next_task();
+        if let Some(gtid) = next {
             let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
             self.run_request.open(RunRequestOption {
                 target: gtid,
                 target_barrier: task.seqnum.load(Ordering::SeqCst),
                 agent_barrier: agent_barrier,
                 commit_flags: COMMIT_AT_TXN_COMMIT as u8,
-                // run_flags: (RTLA_ON_BLOCKED | RTLA_ON_PREEMPT | RTLA_ON_YIELD) as u16,
                 ..Default::default()
             });
 
             if !self.run_request.commit(self.ctl_fd) {
+                log::info!("Failed to commit task: {}", task.gtid);
+
                 task.state = TaskState::Runnable;
             } else {
-                if self.current_task.map_or(false, |it| it != gtid) {
-                    log::info!("New thread is scheduled: {}. From {} runnable threads.", gtid, next.1);
-                }
-                self.current_task = Some(gtid);
+                task.state = TaskState::OnCpu;
+                self.cpu.current = Some(gtid);
             }
         } else {
             let mut flags = 0;
-            if boosted_priority {
+            if self.status_word.boosted_priority() {
                 flags |= RTLA_ON_IDLE;
             }
             self.local_yield(agent_barrier, flags as i32)
@@ -164,7 +178,7 @@ impl<'a> Agent<'a> {
             gtid: 0,
             agent_barrier: agent_barrier,
             task_barrier: 0,
-            run_cpu: self.cpu as i32,
+            run_cpu: self.cpu.id as i32,
             run_flags,
         };
         let res = unsafe { libc::ioctl(self.ctl_fd, GHOST_IOC_RUN_C, &mut data as *mut _) };
@@ -207,9 +221,9 @@ impl<'a> Agent<'a> {
                 log::info!("New process detected: reset the scheduler");
                 self.tasks.clear();
                 self.current_parent_gtid = parent_gtid;
-                self.current_task = None;
                 self.scheduler.new_execution();
                 self.thread_index = 0;
+                self.cpu.clear_current(false);
             }
             if !self.create_task(gtid, unsafe { payload.read_unaligned().sw_info }) {
                 log::error!("Failed to create task {}: task exists", gtid);
@@ -245,7 +259,7 @@ impl<'a> Agent<'a> {
                 update_seqnum = false;
             }
             MSG_TASK_SWITCHTO => {
-                self.task_switchto(gtid, msg);
+                //
             }
             MSG_TASK_AFFINITY_CHANGED => {
                 // todo!("impl this");
@@ -283,51 +297,34 @@ impl<'a> Agent<'a> {
 
     pub fn task_preempted(&mut self, gtid: Gtid, msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
-        task.state = TaskState::Runnable;
-        let payload = msg.get_payload_as::<ghost_msg_payload_task_preempt>();
-        if unsafe { payload.read_unaligned().from_switchto } != 0 {
-            let cpu = unsafe { payload.read_unaligned().cpu };
-            self.ping(cpu);
+        if task.state == TaskState::OnCpu {
+            self.cpu.clear_current(true);
         }
-    }
-
-    pub fn task_switchto(&mut self, gtid: Gtid, _msg: &Message) {
-        let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
-        task.state = TaskState::Blocked;
+        task.state = TaskState::Runnable;
     }
 
     pub fn task_blocked(&mut self, gtid: Gtid, msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
-        task.state = TaskState::Blocked;
+        if task.state == TaskState::OnCpu {
+            self.cpu.clear_current(true);
+            task.state = TaskState::Pending;
+        } else {
+            task.state = TaskState::Blocked;
+        }
         let payload = unsafe { msg.get_payload_as::<ghost_msg_payload_task_blocked>().read_unaligned() };
-        if payload.state == TASK_KILLABLE {
-            self.skip_schedule = true;
-        }
         log::info!("Task blocked: {}, state: {}", gtid, payload.state);
-        if payload.from_switchto != 0 {
-            let cpu = payload.cpu;
-            self.ping(cpu);
-        }
     }
 
     pub fn task_yield(&mut self, gtid: Gtid, msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
+        self.cpu.clear_current(false);
         task.state = TaskState::Runnable;
-        let payload = msg.get_payload_as::<ghost_msg_payload_task_yield>();
-        if unsafe { payload.read_unaligned().from_switchto } != 0 {
-            let cpu = unsafe { payload.read_unaligned().cpu };
-            self.ping(cpu);
-        }
     }
 
     pub fn task_departed(&mut self, gtid: Gtid, msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         task.state = TaskState::Blocked;
         let payload = msg.get_payload_as::<ghost_msg_payload_task_departed>();
-        if unsafe { payload.read_unaligned().from_switchto } != 0 {
-            let cpu = unsafe { payload.read_unaligned().cpu };
-            self.ping(cpu);
-        }
     }
 
     pub fn task_dead(&mut self, gtid: Gtid, _msg: &Message) {
@@ -469,9 +466,9 @@ impl<'a> Agent<'a> {
                 self.ctl_fd,
             );
             assert!(res >= 0);
-            task.cpu = self.cpu;
+            task.cpu = self.cpu.id;
             task.state = TaskState::Runnable;
-            self.ping(self.cpu as i32);
+            self.ping(self.cpu.id as i32);
         }
     }
 
@@ -484,8 +481,8 @@ impl<'a> Agent<'a> {
                 .channel
                 .associate_task(task.gtid, msg.get_seqnum(), self.ctl_fd);
             assert!(res >= 0);
-            task.cpu = self.cpu;
-            self.ping(self.cpu as i32);
+            task.cpu = self.cpu.id;
+            self.ping(self.cpu.id as i32);
         }
     }
 
