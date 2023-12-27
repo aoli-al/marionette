@@ -1,7 +1,7 @@
 use crate::ghost::StatusWordTable;
 use crate::gtid::Gtid;
 use crate::requester::RunRequest;
-use crate::scheduler::Task;
+
 use crate::topology::CpuList;
 use crate::topology::Topology;
 

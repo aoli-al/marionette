@@ -3,12 +3,12 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    thread, time::Duration,
+    thread,
 };
 
 
 
-use libc::{pthread_mutex_t, pthread_mutex_init, pthread_mutex_lock, pthread_mutex_trylock, pthread_mutex_unlock, pthread_mutex_destroy};
+use libc::{pthread_mutex_t, pthread_mutex_init, pthread_mutex_lock, pthread_mutex_trylock, pthread_mutex_unlock};
 use std::mem;
 use std::ptr;
 use std::cell::UnsafeCell;
@@ -88,10 +88,10 @@ impl<T> Mutex<T> {
 
 
 fn counter_test() {
-    let mut counter = Arc::new(Mutex::new(0));
+    let counter = Arc::new(Mutex::new(0));
     let threads = (0..2)
         .map(|id| {
-            let mut counter = Arc::clone(&counter);
+            let counter = Arc::clone(&counter);
             thread::spawn(move || {
                 let mut value = {
                     println!("id: {}", id);
@@ -154,7 +154,7 @@ fn preemption_test() {
     let threads = (0..3)
         .map(|it| {
             thread::spawn(move || {
-                for i in 0..1000 {
+                for _i in 0..1000 {
                     println!("{}", it);
                 }
             })

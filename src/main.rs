@@ -1,6 +1,6 @@
 
 
-use std::{fs::{OpenOptions, File}, path::PathBuf, io::{BufRead, BufReader}, ptr::null};
+use std::{fs::{File}, io::{BufRead, BufReader}, ptr::null};
 
 use marionette::{
     enclave::{Enclave},

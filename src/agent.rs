@@ -15,12 +15,12 @@ use super::*;
 use crate::{
     channel::Channel,
     enclave::{SafeEnclave, CpuState},
-    external::{safe_ghost_ring, safe_ghost_status_word, TASK_KILLABLE},
+    external::{safe_ghost_ring, safe_ghost_status_word},
     ghost::StatusWordTable,
     gtid::{self, Gtid},
     message::{payload_task_new_msg, Message},
     requester::{RunRequest, RunRequestOption},
-    scheduler::{StatusWord, Task, TaskState}, schedulers::{Scheduler, pct::PctScheduler, random::RandomScheduler},
+    scheduler::{StatusWord, Task, TaskState}, schedulers::{Scheduler, random::RandomScheduler},
 };
 
 pub type Notification = Arc<(Mutex<bool>, Condvar)>;
@@ -304,7 +304,7 @@ impl<'a> Agent<'a> {
         }
     }
 
-    pub fn task_preempted(&mut self, gtid: Gtid, msg: &Message) {
+    pub fn task_preempted(&mut self, gtid: Gtid, _msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         if task.state == TaskState::OnCpu {
             self.cpu.clear_current(true);
@@ -324,7 +324,7 @@ impl<'a> Agent<'a> {
         log::info!("Task blocked: {}, state: {}, runtime: {}, cpu_seq: {}", gtid, payload.state, payload.runtime, payload.cpu_seqnum);
     }
 
-    pub fn task_yield(&mut self, gtid: Gtid, msg: &Message) {
+    pub fn task_yield(&mut self, gtid: Gtid, _msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         self.cpu.clear_current(false);
         task.state = TaskState::Runnable;
@@ -333,7 +333,7 @@ impl<'a> Agent<'a> {
     pub fn task_departed(&mut self, gtid: Gtid, msg: &Message) {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         task.state = TaskState::Blocked;
-        let payload = msg.get_payload_as::<ghost_msg_payload_task_departed>();
+        let _payload = msg.get_payload_as::<ghost_msg_payload_task_departed>();
     }
 
     pub fn task_dead(&mut self, gtid: Gtid, _msg: &Message) {
