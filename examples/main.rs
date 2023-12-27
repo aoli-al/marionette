@@ -1,43 +1,108 @@
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     thread, time::Duration,
 };
 
-fn lock_test() {
-    let mut counter = Arc::new(Mutex::new(0));
-    let mut counter_clone = Arc::clone(&counter);
-    let t = thread::spawn(move || {
-        println!("Enter thread!");
-        thread::sleep(Duration::from_secs(1));
-        let mut cur = counter_clone.lock().unwrap();
-        *cur += 1;
-        println!("Leave thread!");
-    });
-    {
-        let mut counter = Arc::clone(&counter);
-        let mut cur = counter.lock().unwrap();
-        thread::sleep(Duration::from_secs(10));
-        *cur += 1;
-    }
-    println!("Lock released!");
-    t.join();
+
+
+use libc::{pthread_mutex_t, pthread_mutex_init, pthread_mutex_lock, pthread_mutex_trylock, pthread_mutex_unlock, pthread_mutex_destroy};
+use std::mem;
+use std::ptr;
+use std::cell::UnsafeCell;
+use std::ops::{Deref, DerefMut};
+
+pub struct Mutex<T> {
+    mutex: pthread_mutex_t,
+    data: UnsafeCell<T>,
 }
+
+pub struct MutexGuard<'a, T> {
+    mutex: &'a Mutex<T>,
+}
+
+impl<T> Deref for MutexGuard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.mutex.data.get() }
+    }
+}
+
+impl<T> DerefMut for MutexGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.mutex.data.get() }
+    }
+}
+
+impl<T> Drop for MutexGuard<'_, T> {
+    fn drop(&mut self) {
+        let result = unsafe { pthread_mutex_unlock(&self.mutex.mutex as *const _ as *mut _) };
+        if result != 0 {
+            panic!("Failed to unlock mutex");
+        }
+    }
+}
+
+unsafe impl<T: Send> Send for Mutex<T> {}
+unsafe impl<T: Send> Sync for Mutex<T> {}
+
+
+impl<T> Mutex<T> {
+    /// Creates a new mutex
+    pub fn new(data: T) -> Self {
+        let mut mutex = unsafe { mem::zeroed() };
+        let result = unsafe { pthread_mutex_init(&mut mutex, ptr::null()) };
+        if result != 0 {
+            panic!("Failed to initialize mutex");
+        }
+
+        Mutex {
+            mutex,
+            data: UnsafeCell::new(data),
+        }
+    }
+
+    /// Locks the mutex, blocking the current thread until it is able to do so.
+    pub fn lock(&self) -> MutexGuard<T> {
+        let result = unsafe { pthread_mutex_lock(&self.mutex as *const _ as *mut _) };
+        if result != 0 {
+            panic!("Failed to lock mutex");
+        }
+
+        MutexGuard { mutex: self }
+    }
+
+    /// Tries to lock the mutex. If it is already locked, it will return None.
+    pub fn try_lock(&self) -> Option<MutexGuard<T>> {
+        let result = unsafe { pthread_mutex_trylock(&self.mutex as *const _ as *mut _) };
+        if result == 0 {
+            Some(MutexGuard { mutex: self })
+        } else {
+            None
+        }
+    }
+}
+
 
 fn counter_test() {
     let mut counter = Arc::new(Mutex::new(0));
     let threads = (0..2)
-        .map(|_| {
+        .map(|id| {
             let mut counter = Arc::clone(&counter);
             thread::spawn(move || {
                 let mut value = {
-                    let curr = counter.lock().unwrap();
+                    println!("id: {}", id);
+                    let curr = counter.lock();
+                    thread::yield_now();
+                    println!("id: {}, cur: {}", id, *curr);
                     *curr
                 };
+                println!("id: {}, value: {}", id, value);
                 value += 1;
-                *counter.lock().unwrap() = value;
+                *counter.lock() = value;
             })
         })
         .collect::<Vec<_>>();
@@ -45,7 +110,7 @@ fn counter_test() {
     for thread in threads {
         thread.join().unwrap();
     }
-    assert_eq!(*counter.lock().unwrap(), 2);
+    assert_eq!(*counter.lock(), 2);
 }
 
 fn counter_test_atomic() {
@@ -89,10 +154,8 @@ fn preemption_test() {
     let threads = (0..3)
         .map(|it| {
             thread::spawn(move || {
-                for i in 0..10 {
+                for i in 0..1000 {
                     println!("{}", it);
-                    for i in 0..100000000  {
-                    }
                 }
             })
         })
@@ -104,5 +167,6 @@ fn preemption_test() {
 }
 
 pub fn main() {
-    preemption_test();
+    counter_test();
+    // preemption_test();
 }

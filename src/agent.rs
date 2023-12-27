@@ -62,6 +62,7 @@ pub struct Agent<'a> {
     run_request: RunRequest,
     current_parent_gtid: u64,
     thread_index: usize,
+    should_reschedule: bool,
 }
 
 unsafe impl<'a> Sync for Agent<'a> {}
@@ -106,6 +107,7 @@ impl<'a> Agent<'a> {
             run_request,
             current_parent_gtid: 0,
             thread_index: 0,
+            should_reschedule: false,
         };
         agent
     }
@@ -126,6 +128,12 @@ impl<'a> Agent<'a> {
         if self.status_word.boosted_priority() {
             return None;
         }
+        if self.should_reschedule {
+            self.should_reschedule = false;
+            let runnable: Vec<Gtid> = self.tasks.iter().filter(|it| it.state == TaskState::Runnable).map(|it| it.gtid).collect();
+            return self.scheduler.next_task(&runnable, self.cpu.current)
+        }
+
         if let Some(prev) = self.cpu.prev  {
             let prev_task = self.tasks.iter_mut().find(|it| it.gtid == prev).unwrap();
             if prev_task.state == TaskState::Runnable {
@@ -140,6 +148,7 @@ impl<'a> Agent<'a> {
                 }
             }
         }
+
         let runnable: Vec<Gtid> = self.tasks.iter().filter(|it| it.state == TaskState::Runnable).map(|it| it.gtid).collect();
         return self.scheduler.next_task(&runnable, self.cpu.current)
     }
@@ -158,11 +167,11 @@ impl<'a> Agent<'a> {
 
             if !self.run_request.commit(self.ctl_fd) {
                 log::info!("Failed to commit task: {}", task.gtid);
-
                 task.state = TaskState::Runnable;
             } else {
                 task.state = TaskState::OnCpu;
                 self.cpu.current = Some(gtid);
+                log::info!("New thread is scheduled: {}", gtid);
             }
         } else {
             let mut flags = 0;
@@ -223,7 +232,7 @@ impl<'a> Agent<'a> {
                 self.current_parent_gtid = parent_gtid;
                 self.scheduler.new_execution();
                 self.thread_index = 0;
-                self.cpu.clear_current(false);
+                self.cpu.clear_current(false)
             }
             if !self.create_task(gtid, unsafe { payload.read_unaligned().sw_info }) {
                 log::error!("Failed to create task {}: task exists", gtid);
@@ -312,7 +321,7 @@ impl<'a> Agent<'a> {
             task.state = TaskState::Blocked;
         }
         let payload = unsafe { msg.get_payload_as::<ghost_msg_payload_task_blocked>().read_unaligned() };
-        log::info!("Task blocked: {}, state: {}", gtid, payload.state);
+        log::info!("Task blocked: {}, state: {}, runtime: {}, cpu_seq: {}", gtid, payload.state, payload.runtime, payload.cpu_seqnum);
     }
 
     pub fn task_yield(&mut self, gtid: Gtid, msg: &Message) {
@@ -474,6 +483,11 @@ impl<'a> Agent<'a> {
 
     pub fn task_runnable(&mut self, gtid: Gtid, msg: &Message) {
         log::info!("Task runnable: {}", gtid);
+
+        if Some(gtid) != self.cpu.prev {
+            self.should_reschedule = true;
+        }
+
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         task.state = TaskState::Runnable;
         if task.cpu < 0 {
