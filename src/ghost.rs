@@ -30,12 +30,12 @@ impl StatusWordTable {
         let f = OpenOptions::new()
             .read(true)
             .open(dir_path.join(format!("sw_regions/sw_{}", id)))
-            .expect(format!("Failed to open sw region {}", id).as_str());
+            .unwrap_or_else(|_| panic!("Failed to open sw region {}", id));
         let map_size = f.metadata().unwrap().len() as usize;
         unsafe {
             let header = libc::mmap(
                 std::ptr::null_mut(),
-                map_size as usize,
+                map_size,
                 libc::PROT_READ,
                 libc::MAP_SHARED,
                 f.as_raw_fd(),

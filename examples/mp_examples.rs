@@ -3,7 +3,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    thread,
+    thread, io::{self, Write}, time::Duration,
 };
 
 
@@ -68,6 +68,7 @@ impl<T> Mutex<T> {
     /// Locks the mutex, blocking the current thread until it is able to do so.
     pub fn lock(&self) -> MutexGuard<T> {
         let result = unsafe { pthread_mutex_lock(&self.mutex as *const _ as *mut _) };
+        thread::yield_now();
         if result != 0 {
             panic!("Failed to lock mutex");
         }
@@ -91,19 +92,25 @@ fn counter_test() {
     let counter = Arc::new(Mutex::new(0));
     let threads = (0..2)
         .map(|id| {
-            let counter = Arc::clone(&counter);
-            thread::spawn(move || {
+            let counter: Arc<Mutex<i32>> = Arc::clone(&counter);
+            let t = thread::spawn(move || {
                 let mut value = {
                     println!("id: {}", id);
+                    io::stdout().flush().unwrap();
                     let curr = counter.lock();
                     thread::yield_now();
                     println!("id: {}, cur: {}", id, *curr);
+                    io::stdout().flush().unwrap();
                     *curr
                 };
+                thread::yield_now();
                 println!("id: {}, value: {}", id, value);
+                io::stdout().flush().unwrap();
                 value += 1;
                 *counter.lock() = value;
-            })
+            });
+            thread::yield_now();
+            t
         })
         .collect::<Vec<_>>();
 
@@ -156,6 +163,7 @@ fn preemption_test() {
             thread::spawn(move || {
                 for _i in 0..1000 {
                     println!("{}", it);
+                    thread::sleep(Duration::from_secs(10));
                 }
             })
         })
@@ -167,6 +175,6 @@ fn preemption_test() {
 }
 
 pub fn main() {
-    counter_test();
-    // preemption_test();
+    // counter_test();
+    preemption_test();
 }

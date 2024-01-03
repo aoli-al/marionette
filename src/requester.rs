@@ -91,7 +91,7 @@ impl RunRequest {
         self.state() == ghost_txn_state_GHOST_TXN_READY
     }
 
-    pub fn commit(&self, ctl_fd: i32) -> bool {
+    pub fn commit(&self, ctl_fd: i32) -> ghost_txn_state {
         if self.is_open() {
             let res = unsafe {
                 let mut cpuset: libc::cpu_set_t = std::mem::zeroed();
@@ -114,6 +114,7 @@ impl RunRequest {
             hint::spin_loop();
         }
         let state = self.state();
-        state == ghost_txn_state_GHOST_TXN_COMPLETE
+        log::info!("Transaction commit result: {}", state);
+        state
     }
 }

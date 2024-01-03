@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicU32, Ordering},
         Arc, Barrier, Mutex,
     },
-    thread,
+    thread, fmt::Display,
 };
 
 use crate::{
@@ -49,9 +49,16 @@ impl StatusWord {
         }
     }
 
+    pub fn flags(&self) -> u32 {
+        unsafe { (*self.sw).flags.load(Ordering::SeqCst) }
+    }
+
+    pub fn on_cpu(&self) -> bool {
+        self.flags() & GHOST_SW_TASK_ONCPU != 0
+    }
+
     pub fn boosted_priority(&self) -> bool {
-        let res = unsafe { (*self.sw).flags.load(Ordering::SeqCst) };
-        res & GHOST_SW_BOOST_PRIO != 0
+        self.flags() & GHOST_SW_BOOST_PRIO != 0
     }
 }
 
@@ -89,11 +96,11 @@ impl<'a> AgentManager<'a> {
     pub fn new(enclave: &'a mut Enclave) -> Self {
         let _channels = HashMap::<usize, Channel>::new();
         let _tasks = HashMap::<usize, Vec<Task>>::new();
-        let scheduler = Self {
+
+        Self {
             tasks: HashMap::new(),
             enclave,
-        };
-        scheduler
+        }
     }
 
     pub fn start(&self) {

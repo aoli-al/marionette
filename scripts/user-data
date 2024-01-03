@@ -1,0 +1,12 @@
+#cloud-config
+hostname: marionette
+fqdn: marionette
+disable_root: false
+users:
+  - default
+  - name: aoli
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    ssh_authorized_keys:
+      - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC73QPgX1g+A9eC8otYFhqXfYX7XwOtpFrR444vEwSkx4l3LISsUKvs8GqT7Nd2aya5b6yrnKUFQ8y9S4z07ZZoYvTAT+0JE9XKraGnAenBpVxmmIN/UWDDl2tpy+rRwn+/WUkLzd4eJfxpg1r3agHpMezUAIHxquJcECVw05m/5+5ezg4CXEmezwe6wcoO+BHefgGSCLc+d6BWCWpm5mBBxZXPsZrrVEKO1tExOMa62bvhh1a5+SUW4gx+4FD7N+Ph4guZAj74zon2Z8kyU1k7yBCXe8NJKyulYbDgV9TY4T6B691+ddvfRJ4/4rlyBhGZJVZpGhnTfasiL+w0fH0R2J/TSk/sgq6Y/tDQpYjAV27vW17//HpY3iI4C9Li6N8+ROxzAVdP+wDoyd7bqOjduZ0w1WuEyMJYKkBWv15E4P0k80uX6Vy5PLFYJ5J4iCeIANR+XTx3BpfPcIOii6rewNGkjdPVpIzra98mQqzushnXvVkUxwAc8JixMtHS14OVM0PX+8mTbOwyWeAmpuq+Ve7UKWiBu4kAQJTDMn2gxdEUA7lqTVljSdn+6Dx8lAVLlkQFUILWEey0ml24iljpCpfyV3VdF7ZE5AFszcjcV6UP8Wmy7ZPjWeClHuUEbVCVv52litrVzCCvmiNq0JuAd3sRJAus3RKO7OQa7f/2RQ=="

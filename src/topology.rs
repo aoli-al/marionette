@@ -208,7 +208,7 @@ fn get_all_siblings(prefix: &str, suffix: &str, num_cpus: i32) -> HashMap<i32, C
         let f = OpenOptions::new()
             .read(true)
             .open(path)
-            .expect(format!("Failed to open CPU {}", i).as_str());
+            .unwrap_or_else(|_| panic!("Failed to open CPU {}", i));
         let mut buf_reader = BufReader::new(f);
         let mut sibling_list = String::new();
         buf_reader
@@ -278,7 +278,7 @@ impl Topology {
                 CpuRep {
                     siblings: sls.clone(),
                     l3_siblings: l3_sls.clone(),
-                    numa_node: numa_node,
+                    numa_node,
                 }
             })
             .collect();

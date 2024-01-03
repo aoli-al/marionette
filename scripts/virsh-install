@@ -1,0 +1,4 @@
+virsh destroy marionette
+virsh undefine marionette
+virsh define vm.xml
+virsh start marionette 

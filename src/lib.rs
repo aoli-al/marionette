@@ -16,5 +16,6 @@ pub mod task;
 pub mod topology;
 pub mod utils;
 pub mod schedulers;
+pub mod random;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));

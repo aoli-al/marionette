@@ -1,6 +1,6 @@
 use crate::gtid::Gtid;
 
-pub mod basic_scheduler;
+pub mod recorder;
 pub mod pct;
 pub mod random;
 
@@ -13,5 +13,9 @@ pub trait Scheduler {
         &mut self,
         runnable_tasks: &Vec<Gtid>,
         current_task: Option<Gtid>,
-    ) -> Option<Gtid>;
+    ) -> (Option<Gtid>, bool);
+
+    fn dump_schedules(&self);
+
+    fn revert_last_choice(&mut self);
 }

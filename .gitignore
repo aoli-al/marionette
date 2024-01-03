@@ -1,6 +1,11 @@
 bazel-*
 compile_commands.json
 a.out
+.vagrant
+*.img
+*.iso
+
+vm/
 
 
 # Added by cargo

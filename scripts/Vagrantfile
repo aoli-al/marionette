@@ -1,0 +1,20 @@
+Vagrant.configure("2") do |config|
+  # Specify the base image
+  config.vm.box = "ubuntu/focal64"
+  config.disksize.size = '100GB'
+
+  # Configure VM resources
+  config.vm.provider "virtualbox" do |vb|
+    vb.name = "Ubuntu2004VM"
+    vb.cpus = 16
+    vb.memory = "16384"
+  end
+
+  config.vm.provision "shell", inline: <<-SHELL
+    sudo mkdir -p /home/vagrant/marionette
+    sudo chown vagrant:vagrant /home/vagrant/marionette
+  SHELL
+
+
+  config.vm.synced_folder "../", "/home/vagrant/marionette"
+end

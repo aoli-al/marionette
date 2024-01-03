@@ -270,7 +270,7 @@ impl SafeEnclave {
 
         assert_eq!(agent_affinity.size(), 1);
         assert!(agent_affinity.is_set(cpu));
-        assert_eq!(unsafe { libc::sched_getcpu() }, cpu as i32);
+        assert_eq!(unsafe { libc::sched_getcpu() }, { cpu });
     }
 
     pub fn wait_for_agent_online_value(&self, until: i32) {

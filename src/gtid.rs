@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Gtid {
     pub gtid_raw: i64,
 }

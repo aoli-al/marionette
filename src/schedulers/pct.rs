@@ -44,9 +44,9 @@ impl Scheduler for PctScheduler {
         }
     }
 
-    fn next_task(&mut self, runnable_tasks: &Vec<Gtid>, _current_task: Option<Gtid>) -> Option<Gtid> {
+    fn next_task(&mut self, runnable_tasks: &Vec<Gtid>, _current_task: Option<Gtid>) -> (Option<Gtid>, bool) {
         if runnable_tasks.is_empty() {
-            return None;
+            return (None, false);
         }
         let priorities = &mut self.priorities;
         let new_tasks: Vec<Gtid> = runnable_tasks
@@ -69,9 +69,15 @@ impl Scheduler for PctScheduler {
         }
         let task = *self.priorities.iter().find(|it| runnable_tasks.contains(it)).unwrap();
         self.steps += 1;
-        Some(task)
+        (Some(task), true)
     }
 
+    fn dump_schedules(&self) {
+    }
+
+
+    fn revert_last_choice(&mut self) {
+    }
 
 }
 
