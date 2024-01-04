@@ -308,10 +308,10 @@ impl<'a> Agent<'a> {
         let task = self.tasks.iter_mut().find(|it| it.gtid == gtid).unwrap();
         let payload = unsafe { msg.get_payload_as::<ghost_msg_payload_task_blocked>().read_unaligned() };
         log::info!("Task blocked: {}, state: {:?}, payload: {}", gtid, task.state, payload.state);
-        if task.state == TaskState::OnCpu {
+        if task.state == TaskState::OnCpu && (payload.state & 0x2000 == 0)  {
             self.cpu.clear_current(true);
             task.state = TaskState::Pending;
-        } else if task.state == TaskState::Pending {
+        } else {
             self.cpu.clear_current(false);
             task.state = TaskState::Blocked;
         }

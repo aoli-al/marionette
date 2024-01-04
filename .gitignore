@@ -10,4 +10,4 @@ vm/
 
 # Added by cargo
 
-/target
+target/

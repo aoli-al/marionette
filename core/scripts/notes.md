@@ -1,0 +1,2 @@
+- sudo mount -t 9p -otrans=virtio,rw,version=9p2000.L  /marionette marionette
+- https://gist.github.com/shamil/62935d9b456a6f9877b5

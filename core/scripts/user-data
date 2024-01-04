@@ -3,7 +3,6 @@ hostname: marionette
 fqdn: marionette
 disable_root: false
 users:
-  - default
   - name: aoli
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL

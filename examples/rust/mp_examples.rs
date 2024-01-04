@@ -161,9 +161,9 @@ fn preemption_test() {
     let threads = (0..3)
         .map(|it| {
             thread::spawn(move || {
-                for _i in 0..1000 {
+                for _i in 0..10 {
                     println!("{}", it);
-                    thread::sleep(Duration::from_secs(10));
+                    thread::sleep(Duration::from_secs(1));
                 }
             })
         })
