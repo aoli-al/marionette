@@ -18,7 +18,7 @@
   </resource>
   <os>
     <type arch='x86_64' machine='pc-q35-6.2'>hvm</type>
-    <kernel>/home/aoli/repos/ghost-kernel/arch/x86/boot/bzImage</kernel>
+    <kernel>/home/aoli/repos/marionette/kernel/arch/x86/boot/bzImage</kernel>
     <cmdline>root=/dev/vda1 ro console=tty1 console=ttyS0,115200 2</cmdline>
     <boot dev='hd'/>
   </os>
@@ -43,7 +43,7 @@
     <emulator>/usr/bin/qemu-system-x86_64</emulator>
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2'/>
-      <source file='./ubuntu-20.04-server-cloudimg-amd64.img' index='2'/>
+      <source file='/home/aoli/repos/marionette/scripts/ubuntu-20.04-server-cloudimg-amd64.img' index='2'/>
       <backingStore/>
       <target dev='vda' bus='virtio'/>
       <alias name='virtio-disk0'/>
@@ -51,7 +51,7 @@
     </disk>
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
-      <source file='/home/aoli/repos/ghost-userspace/scripts/nocloud.iso' index='1'/>
+      <source file='/home/aoli/repos/marionette/scripts/nocloud.iso' index='1'/>
       <backingStore/>
       <target dev='sda' bus='sata'/>
       <readonly/>
@@ -59,7 +59,7 @@
       <address type='drive' controller='0' bus='0' target='0' unit='0'/>
     </disk>
     <filesystem type='mount' accessmode='mapped'>
-      <source dir='../'/>
+      <source dir='/home/aoli/repos/marionette'/>
       <target dir='/marionette'/>
       <address type='pci' domain='0x0000' bus='0x00' slot='0x08' function='0x0'/>
     </filesystem>

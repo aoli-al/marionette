@@ -87,6 +87,35 @@ impl<T> Mutex<T> {
     }
 }
 
+fn counter_test_std_mutex() {
+    let counter = Arc::new(std::sync::Mutex::new(0));
+    let threads = (0..2)
+        .map(|id| {
+            let counter = Arc::clone(&counter);
+            let t = thread::spawn(move || {
+                let mut value = {
+                    println!("id: {}", id);
+                    io::stdout().flush().unwrap();
+                    let curr = counter.lock().unwrap();
+                    println!("id: {}, cur: {}", id, *curr);
+                    io::stdout().flush().unwrap();
+                    *curr
+                };
+                println!("id: {}, value: {}", id, value);
+                io::stdout().flush().unwrap();
+                value += 1;
+                *counter.lock().unwrap() = value;
+            });
+            t
+        })
+        .collect::<Vec<_>>();
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    assert_eq!(*counter.lock().unwrap(), 2);
+}
+
 
 fn counter_test() {
     let counter = Arc::new(Mutex::new(0));
@@ -97,8 +126,7 @@ fn counter_test() {
                 let mut value = {
                     println!("id: {}", id);
                     io::stdout().flush().unwrap();
-                    let curr = counter.lock();
-                    thread::yield_now();
+                    let curr: MutexGuard<'_, i32> = counter.lock();
                     println!("id: {}, cur: {}", id, *curr);
                     io::stdout().flush().unwrap();
                     *curr
@@ -109,7 +137,6 @@ fn counter_test() {
                 value += 1;
                 *counter.lock() = value;
             });
-            thread::yield_now();
             t
         })
         .collect::<Vec<_>>();
@@ -175,6 +202,7 @@ fn preemption_test() {
 }
 
 pub fn main() {
-    // counter_test();
-    preemption_test();
+    counter_test();
+    // counter_test_std_mutex();
+    // preemption_test();
 }

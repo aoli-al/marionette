@@ -5,9 +5,12 @@ a.out
 *.img
 *.iso
 
+*.bc
 vm/
 
 
 # Added by cargo
 
 target/
+.cache/
+*.bin

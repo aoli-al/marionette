@@ -1,0 +1,2 @@
+[build]
+rustflags = ["--emit=llvm-ir", "-Z", "llvm-plugins=/home/aoli/marionette/instrumentation/llvm/build/src/libInjectYieldPass.so", "-C", "passes=inject-yield"]
