@@ -131,7 +131,6 @@ fn counter_test() {
                     io::stdout().flush().unwrap();
                     *curr
                 };
-                thread::yield_now();
                 println!("id: {}, value: {}", id, value);
                 io::stdout().flush().unwrap();
                 value += 1;

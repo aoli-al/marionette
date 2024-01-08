@@ -9,3 +9,9 @@ libc = "0.2"
 
 [toolchain]
 channel = "nightly"
+
+
+[features]
+default = ["regular"]
+regular = []
+instrumented = []

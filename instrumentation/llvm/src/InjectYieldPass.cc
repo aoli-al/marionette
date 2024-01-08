@@ -1,19 +1,20 @@
 #include "InjectYieldPass.hpp"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/raw_ostream.h"
 #include <iostream>
-#include <llvm-17/llvm/IR/InstrTypes.h>
-#include <llvm-17/llvm/Support/raw_ostream.h>
+#include <llvm-17/llvm/IR/DerivedTypes.h>
 
 namespace marionette {
 
 bool InjectYieldPass::shouldInstrument(CallBase &CB) {
   auto Callee = CB.getCalledFunction();
-  if (!Callee->hasName()) {
+  if (Callee == nullptr || !Callee->hasName()) {
     return false;
   }
 
@@ -25,30 +26,40 @@ bool InjectYieldPass::shouldInstrument(CallBase &CB) {
   return false;
 }
 
+bool InjectYieldPass::instrumentBB(BasicBlock *BB, FunctionCallee &Callee) {
+  if (this->InstrumentedBlocks.contains(BB)) {
+    return false;
+  }
+  this->InstrumentedBlocks.insert(BB);
+  IRBuilder<> Builder(BB);
+  Builder.SetInsertPoint(BB, BB->begin());
+  Builder.CreateCall(Callee);
+  return true;
+}
+
 bool InjectYieldPass::instrumentCallBase(CallBase &CB, BasicBlock &BB) {
   auto &Ctx = CB.getContext();
   FunctionCallee YieldFunc = CB.getModule()->getOrInsertFunction(
-      "sched_yield",
-      FunctionType::get(IntegerType::getInt32Ty(Ctx), false));
-
+      "sched_yield", FunctionType::get(IntegerType::getInt32Ty(Ctx), false));
   if (!shouldInstrument(CB)) {
     return false;
   }
 
+  // llvm::outs() << "start instrument: " << CB;
+
   if (isa<CallInst>(CB)) {
+    llvm::outs() << "Instrument CI: " << CB;
     IRBuilder<> Builder(&CB);
     Builder.SetInsertPoint(&BB, ++Builder.GetInsertPoint());
     Builder.CreateCall(YieldFunc);
-    return true;
+    return false;
   }
   if (isa<InvokeInst>(CB)) {
+    llvm::outs() << "Instrument II: " << CB;
     auto &II = cast<InvokeInst>(CB);
     auto DestBB = II.getNormalDest();
     if (DestBB != nullptr) {
-      llvm::outs() << *DestBB;
-      IRBuilder<> Builder(DestBB);
-      Builder.CreateCall(YieldFunc);
-      return true;
+      return instrumentBB(DestBB, YieldFunc);
     } else {
       llvm::outs() << "Empty Dest BB?";
     }
@@ -59,18 +70,18 @@ bool InjectYieldPass::instrumentCallBase(CallBase &CB, BasicBlock &BB) {
 bool InjectYieldPass::runOnModule(Module &M) {
   auto &Context = M.getContext();
 
-  bool instrumented = false;
+  bool Instrumented = false;
 
   for (auto &F : M) {
     for (auto &BB : F) {
       for (auto &I : BB) {
         if (isa<CallBase>(I)) {
-          instrumented |= instrumentCallBase(cast<CallBase>(I), BB);
+          Instrumented |= instrumentCallBase(cast<CallBase>(I), BB);
         }
       }
     }
   }
-  return instrumented;
+  return Instrumented;
 }
 
 PreservedAnalyses InjectYieldPass::run(llvm::Module &M,
