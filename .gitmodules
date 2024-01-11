@@ -1,3 +1,6 @@
 [submodule "kernel"]
 	path = kernel
 	url = git@github.com:aoli-al/ghost-kernel.git
+[submodule "instrumentation/llvm/rust/rustc-demangle"]
+	path = instrumentation/llvm/rust/rustc-demangle
+	url = https://github.com/rust-lang/rustc-demangle

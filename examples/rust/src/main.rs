@@ -127,10 +127,15 @@ fn counter_test() {
                     println!("id: {}", id);
                     io::stdout().flush().unwrap();
                     let curr: MutexGuard<'_, i32> = counter.lock();
-                    println!("id: {}, cur: {}", id, *curr);
+                    println!("before yield1: {}", id);
+                    thread::yield_now();
+                    println!("after yield1: {}, cur: {}", id, *curr);
                     io::stdout().flush().unwrap();
                     *curr
                 };
+                println!("before yield2: {}", id);
+                thread::yield_now();
+                println!("after yield2: {}", id);
                 println!("id: {}, value: {}", id, value);
                 io::stdout().flush().unwrap();
                 value += 1;

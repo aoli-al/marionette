@@ -8,9 +8,20 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 #include <iostream>
-#include <llvm-17/llvm/IR/DerivedTypes.h>
+#include "llvm/IR/DerivedTypes.h"
+
+#include "rust_demangle.h"
 
 namespace marionette {
+
+std::string InjectYieldPass::demangle(std::string OriName) {
+  char DemangleBuffer[500];
+  int OutSize;
+
+  rustc_demangle(OriName.c_str(), DemangleBuffer, OutSize);
+
+  return std::string(DemangleBuffer, OutSize);
+}
 
 bool InjectYieldPass::shouldInstrument(CallBase &CB) {
   auto Callee = CB.getCalledFunction();
@@ -18,7 +29,12 @@ bool InjectYieldPass::shouldInstrument(CallBase &CB) {
     return false;
   }
 
-  auto Name = Callee->getName();
+  auto Name = demangle(Callee->getName().str());
+
+  // if (rustc_demangle(Name.str().c_str(), DemangleBuffer, OutSize)) {
+  //   std::string DemangedName(DemangleBuffer, OutSize);
+  //   llvm::outs() << "Demangled: " <<  DemangedName << "\n";
+  // }
 
   if (Name.contains("drop_in_place") && Name.contains("MutexGuard")) {
     return true;
