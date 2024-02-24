@@ -68,7 +68,6 @@ impl<T> Mutex<T> {
     /// Locks the mutex, blocking the current thread until it is able to do so.
     pub fn lock(&self) -> MutexGuard<T> {
         let result = unsafe { pthread_mutex_lock(&self.mutex as *const _ as *mut _) };
-        thread::yield_now();
         if result != 0 {
             panic!("Failed to lock mutex");
         }
